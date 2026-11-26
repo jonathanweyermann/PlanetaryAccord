@@ -119,7 +119,16 @@ function notice(message, error = false) {
 function initControls() {
   window.addEventListener('pointerdown', () => audio.wake(), { capture: true, passive: true });
   window.addEventListener('keydown', (event) => { if (!event.repeat) audio.wake(); }, { capture: true });
-  const updateAudio = () => audio.configure({ effects: $('sound-effects').checked, music: $('music').checked });
+  const AUDIO_KEY = 'planetary-accord:audio';
+  try {
+    const saved = JSON.parse(localStorage.getItem(AUDIO_KEY) ?? 'null');
+    if (saved) { $('sound-effects').checked = saved.effects !== false; $('music').checked = saved.music !== false; }
+  } catch { /* storage unavailable: keep defaults */ }
+  const updateAudio = () => {
+    const settings = { effects: $('sound-effects').checked, music: $('music').checked };
+    audio.configure(settings);
+    try { localStorage.setItem(AUDIO_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+  };
   $('sound-effects').addEventListener('change', updateAudio);
   $('music').addEventListener('change', updateAudio);
   updateAudio();
