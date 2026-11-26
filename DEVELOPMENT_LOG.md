@@ -91,3 +91,34 @@ The game was played in the browser pane at `http://localhost:8000/?seed=22204131
 - **Wars are decisive and abrupt.** On seed 3921109754, Drift's command centre went from healthy to destroyed in about 1 second, and the faction was eliminated 53s after war was declared. Peace bids come too late. Defence, command-centre durability and attack pacing need a closer look with a visible browser pane.
 - Effective game speed in a hidden browser pane is far below the selected speed. Performance in a visible pane is unmeasured.
 - Number keys 1–6 start building placement.
+
+## 2026-11-26 — Iteration 5: survivable wars, AI defenses, AI economy fixes
+
+### Diagnosis
+- **Wars were massacres.** A forced war on seed 3921109754 eliminated Drift 53s after the declaration. The command centre had 260 HP and no weapon. Infantry deal about 13 DPS each, so a 16-unit army destroyed a 720 HP command centre in about 4s.
+- **AI armies were unbounded.** Recruitment's fallback was "train another infantry". After 40 min, Meridian had 84 units, Aurora 94 and Drift 99.
+- **The AI never upgraded or built defenses.** Command stayed Tier I forever, so Defense Towers were never available, and the AI only repaired a command centre that was already at 0 HP.
+- **An AI economy deadlock.** Meridian on seed 3921109754 lost all its rovers to wildlife at a deposit. It had no metal income and 23 metal (a rover costs 25), so it stayed stuck for the rest of the game. Its unfinished mine blueprint also blocked it from ever ordering another mine.
+
+### Changes
+- Command health doubled on every tier (520/720/1000), and it now has a defensive battery: 10 damage, range 10, one shot per second.
+- Structures take 35% damage from small arms; shell-firing units (tanks, artillery) still do full damage.
+- AI colonies upgrade to Tier II when threatened or after 15 min, then build 1–3 Defense Towers on the side facing their nearest rival.
+- AI rovers repair any structure below 70%, command centre first.
+- AI standing armies are capped by temperament: about 10 (commercial) to 18 (militaristic), plus 6 when threatened. The restless-army baseline was lowered from 300 to 150 so aggression still works with capped armies.
+- A colony with no rovers always trains a replacement first, and its command centre salvages 0.25 metal/s until it has one.
+- The AI resumes blueprints whose crew died.
+- AI soldiers clear hostile wildlife within 45 units of home.
+
+### Evidence
+- **Headless 40-min runs:** each faction ends with 14–25 units, Tier II and 0–2 towers. Seed 2220413130 had one incident resolved by ceasefire, seed 3921109754 had two incidents (one ceasefire), and seed 12345 was peaceful.
+- **Meridian on seed 3921109754:** the mine is now finished by 3 min and metal grows steadily. Before, it was stuck at 23 metal with 2 units for the whole game.
+- **Forced war, Forge (militaristic) vs Drift, 10 min:** Drift's command centre held at about 550/720 HP, and towers plus the battery cut Forge's assault force from 15 to 1–4 units. Before these changes, Drift was eliminated in 53s.
+- 65/65 tests pass, including a new test for the rover deadlock.
+- In the browser, the game loads with no console errors. I didn't watch a war in the browser.
+
+### Remaining weaknesses (next session)
+- **Army tactics.** The defender's army charges out about 100 units to meet attackers, arrives strung out and is destroyed piecemeal (16 → 1 while the attacker lost 2). Defenders should hold near home and their towers, and attackers should gather before advancing.
+- **Peace evaluation.** Forge kept rejecting peace with only 1–4 units left, because its strength estimate counts towers and buildings, which can't project force. The attacker's offensive strength should drive that decision.
+- AI populations keep growing through endless habitats (pop 90+), and metal stockpiles reach 1,000+ unused. The AI needs better resource sinks.
+- Number keys 1–6 start building placement.
