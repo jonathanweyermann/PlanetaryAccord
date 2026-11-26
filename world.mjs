@@ -1519,6 +1519,26 @@ function progressWildlife(state, dt) {
   }
 }
 
+export const FAMINE_DEPARTURE_INTERVAL = 30;
+
+// Food upkeep scales with population. Warn before stores run dry; once they are empty and
+// still shrinking, colonists periodically leave until upkeep matches production again.
+function advanceFoodSupply(state, foodRate, dt) {
+  const food = state.resources.food;
+  if (food >= 40 || foodRate >= 0) state.foodWarned = false;
+  if (foodRate < 0 && food > 0 && food < 20 && !state.foodWarned) {
+    state.foodWarned = true;
+    log(state, `Food reserves are running low (${Math.ceil(food / -foodRate)}s left). Build a Farm to feed the colony.`);
+  }
+  if (foodRate >= 0 || food > 0) { state.famine = 0; return; }
+  state.famine = (state.famine || 0) + dt;
+  const floor = Math.max(4, state.units.length);
+  if (state.famine < FAMINE_DEPARTURE_INTERVAL || state.population <= floor) return;
+  state.famine = 0;
+  state.population--;
+  log(state, `Food stores are empty. A colonist has left the colony. Population ${state.population}.`);
+}
+
 function advanceColony(state, dt) {
   state.units = state.units.filter((unit) => {
     if (unit.health > 0) return true;
@@ -1533,6 +1553,7 @@ function advanceColony(state, dt) {
     if (building.progress !== 1 || building.health <= 0 || !building.deposit) continue;
     building.deposit.amount = Math.max(0, building.deposit.amount - dt * buildingOutput(state, building));
   }
+  advanceFoodSupply(state, rates.food, dt);
   if (state.population < capacity(state) && rates.food > 0 && state.resources.food >= 36 && state.time >= (state.nextColonist || 0)) {
     state.population++;
     state.resources.food -= 8;

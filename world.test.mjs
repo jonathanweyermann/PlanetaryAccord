@@ -952,3 +952,16 @@ test('a patrol assigned to a tree harvests that tree first and then gathers near
   assert.equal(rock.surface, 0);
   assert.equal(rover.order.kind, 'harvestPatrol');
 });
+
+test('an empty food store warns first and then costs colonists until upkeep balances', () => {
+  const game = fixture();
+  game.resources.food = 10;
+  updateGame(game, 0.1);
+  assert(game.messages.some((entry) => /Food reserves are running low/.test(entry.message)));
+  const before = game.population;
+  game.resources.food = 0;
+  for (let step = 0; step < 310; step++) updateGame(game, 0.1);
+  assert.equal(game.population, before - 1);
+  for (let step = 0; step < 20000; step++) { game.resources.food = 0; updateGame(game, 0.1); }
+  assert.equal(game.population, Math.max(4, game.units.length));
+});
