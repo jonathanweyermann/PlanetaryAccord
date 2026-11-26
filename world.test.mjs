@@ -965,3 +965,21 @@ test('an empty food store warns first and then costs colonists until upkeep bala
   for (let step = 0; step < 20000; step++) { game.resources.food = 0; updateGame(game, 0.1); }
   assert.equal(game.population, Math.max(4, game.units.length));
 });
+
+test('an AI colony that loses every rover trains a replacement even with no metal income', () => {
+  const game = createGame(14, { factions: [
+    { id: 'a', home: point(0, 0), controller: 'human' },
+    { id: 'b', home: point(47, 0), controller: 'ai' },
+  ], territories: [
+    { faction: 'a', minX: -70, maxX: 20, minZ: -60, maxZ: 60 },
+    { faction: 'b', minX: 20, maxX: 70, minZ: -60, maxZ: 60 },
+  ], gatherables: [] });
+  game.hostiles.length = 0;
+  const ai = game.factions.get('b');
+  for (const rover of ai.units.filter((unit) => unit.type === 'rover')) rover.health = 0;
+  ai.resources.metal = 100;
+  ai.nextDecision = 0;
+  updateGame(game, 0.1);
+  updateGame(game, 0.1);
+  assert(ai.queue.some((unit) => unit.type === 'rover') || ai.units.some((unit) => unit.type === 'rover' && unit.health > 0));
+});

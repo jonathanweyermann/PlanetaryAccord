@@ -43,9 +43,9 @@ export const BIOMES = {
 };
 
 export const COMMAND_TIERS = {
-  1: { health: 260, capacity: 10, vision: 12 },
-  2: { health: 360, capacity: 15, vision: 15, time: 35, cost: { metal: 100, biomass: 45, energy: 60 } },
-  3: { health: 500, capacity: 20, vision: 18, time: 55, cost: { metal: 180, biomass: 80, energy: 120 } },
+  1: { health: 520, capacity: 10, vision: 12 },
+  2: { health: 720, capacity: 15, vision: 15, time: 35, cost: { metal: 100, biomass: 45, energy: 60 } },
+  3: { health: 1000, capacity: 20, vision: 18, time: 55, cost: { metal: 180, biomass: 80, energy: 120 } },
 };
 
 export const ORBITAL_SURVEY = {
@@ -65,7 +65,7 @@ export const RESEARCH = {
 const OPTICS_TYPES = new Set(['scout', 'pathfinder', 'drone', 'relay']);
 
 export const BUILDINGS = {
-  command: { name: 'Colonial Command Center', trains: ['rover', 'scout', 'infantry'] },
+  command: { name: 'Colonial Command Center', trains: ['rover', 'scout', 'infantry'], combat: { damage: 10, range: 10, cooldown: 1 } },
   mine: { name: 'Mine', tier: 1, key: '1', shortcut: 'm', cost: { metal: 45, biomass: 15 }, time: 27, deposit: 'metal', produces: 'metal', output: 1.28, description: 'Extracts metal from deposits.' },
   solar: { name: 'Solar Array', tier: 1, key: '2', shortcut: 's', cost: { metal: 30, biomass: 10 }, time: 19, produces: 'energy', output: 1.65, description: 'Generates energy. Desert sites yield more.' },
   habitat: { name: 'Habitat', tier: 1, key: '3', shortcut: 'h', cost: { metal: 35, biomass: 30 }, time: 32, produces: 'energy', output: -0.12, description: 'Houses 5 additional colonists.' },
@@ -352,7 +352,9 @@ function buildingOutput(state, building) {
 }
 
 export function productionDetails(state, seconds = 1) {
-  const rates = { metal: 0, biomass: 0, food: 0.15 - state.population * 0.033, energy: 0.48, crystal: 0, vent: 0 };
+  // A colony with no rovers has no way to gather; Command salvages a trickle of metal so it can rebuild one.
+  const salvage = state.buildings[0]?.health > 0 && !state.units.some((unit) => unit.type === 'rover' && unit.health > 0) ? 0.25 : 0;
+  const rates = { metal: salvage, biomass: 0, food: 0.15 - state.population * 0.033, energy: 0.48, crystal: 0, vent: 0 };
   const active = [];
   for (const building of state.buildings) {
     if (building.progress < 1 || building.health <= 0) continue;
@@ -1435,8 +1437,13 @@ function checkDefeat(colony) {
   }
 }
 
+export const STRUCTURE_SMALL_ARMS_FACTOR = 0.35;
+
 function applyCombatDamage(state, attacker, target, amount) {
-  target.health -= amount;
+  // Structures are armoured: small arms barely scratch them, while shell-firing siege units hit in full.
+  const structure = target.progress !== undefined;
+  const smallArms = !(UNITS[attacker.type] ?? BUILDINGS[attacker.type])?.combat?.shell;
+  target.health -= structure && smallArms ? amount * STRUCTURE_SMALL_ARMS_FACTOR : amount;
   const victim = state.factions.get(target.factionId);
   if (victim) {
     victim.lastAttackedAt = state.time;
@@ -1642,6 +1649,14 @@ function bestConstructionSite(colony, type, rovers) {
 
 function planIndustry(colony, rates, rovers) {
   if (!rovers.length) return;
+  // Resume blueprints whose crew was lost; otherwise they block that building type forever.
+  const crewed = new Set(colony.units.map((unit) => unit.order?.kind === 'build' && unit.order.building).filter(Boolean));
+  const stalled = colony.buildings.find((building) => building.progress < 1 && !crewed.has(building)
+    && (!building.materialShortage || colony.resources[building.materialShortage] >= 20));
+  if (stalled && !assistConstruction(colony, stalled, [rovers[0]])) {
+    colony.lastAction = `Resuming ${BUILDINGS[stalled.type].name} construction`;
+    return;
+  }
   const has = (type) => colony.buildings.some((building) => building.type === type && (!building.deposit || building.deposit.amount > 0));
   const underConstruction = (type) => colony.buildings.some((building) => building.type === type && building.progress < 1);
   const plans = [
@@ -1701,13 +1716,23 @@ function clearGroves(colony, rovers) {
 }
 
 function planRecruits(colony, rates, underThreat) {
+  // Without rovers there is no metal income, so always rebuild one first instead of waiting on income.
+  const stranded = ![...colony.units, ...colony.queue].some((unit) => unit.type === 'rover');
+  if (stranded && colony.queue.length < 2 && canAfford(colony, UNITS.rover.cost)) {
+    if (!queueUnit(colony, 'rover')) colony.lastAction = 'Training a replacement Construction Rover';
+    return;
+  }
   if (colony.queue.length >= 2 || rates.metal <= 0 || rates.food <= 0) return;
   if (colony.units.length + colony.queue.length >= colony.population - 1) return;
   const roster = [...colony.units, ...colony.queue];
   const count = (type) => roster.filter((unit) => unit.type === type).length;
-  const type = underThreat || (colony.personality.military > 0.75 && count('infantry') < 3) ? 'infantry'
-    : count('rover') < Math.min(5, Math.ceil(colony.population / 4)) ? 'rover'
-    : count('scout') < 2 ? 'scout' : 'infantry';
+  // Standing armies are capped by temperament so wars are contests, not massacres of 90-unit hordes.
+  const armyCap = Math.round(6 + colony.personality.military * 12) + (underThreat ? 6 : 0);
+  const army = roster.filter((unit) => UNITS[unit.type].combat).length;
+  const rovers = count('rover') < Math.min(5, Math.ceil(colony.population / 4));
+  const type = (underThreat || (colony.personality.military > 0.75 && count('infantry') < 3)) && army < armyCap ? 'infantry'
+    : rovers ? 'rover' : count('scout') < 2 ? 'scout' : army < armyCap ? 'infantry' : null;
+  if (!type) return;
   if (colony.resources.metal < UNITS[type].cost.metal + 42 || !canAfford(colony, UNITS[type].cost)) return;
   if (!queueUnit(colony, type)) colony.lastAction = `Training ${UNITS[type].name}`;
 }
@@ -1732,6 +1757,15 @@ function planMilitary(colony) {
     }
     if (available.some((unit) => unit.order?.kind === 'attack')) return;
   }
+  // Clear wildlife that threatens the colony's workers and build sites.
+  const pest = colony.hostiles.filter((hostile) => hostile.health > 0 && distance(hostile, colony.home) < 45)
+    .sort((a, b) => distance(a, colony.home) - distance(b, colony.home))[0];
+  if (pest) {
+    const hunters = available.filter((unit) => !crossesTerritory(world, unit, pest,
+      (id) => id && id !== country && !diplomacy.canAttack(country, id))).slice(0, 4);
+    for (const unit of hunters) setUnitOrder(unit, { kind: 'attack', target: pest });
+    if (hunters.length) { colony.lastAction = 'Clearing hostile wildlife'; return; }
+  }
   if (combat.length < 3 || available.length < 2) return;
   const candidate = [...colony.knownFactions].map((id) => ({ id, score: intrusionScore(diplomacy, country, id) }))
     .filter(({ score }) => score >= 37).sort((a, b) => b.score - a.score)[0];
@@ -1753,6 +1787,53 @@ function planMilitary(colony) {
   }
 }
 
+// Keeps a rover on hand to patch up any structure that has taken real damage.
+function planRepairs(colony) {
+  const repairing = new Set(colony.units.filter((unit) => unit.order?.kind === 'repair').map((unit) => unit.order.building));
+  const damaged = colony.buildings.filter((building) => building.progress === 1 && building.type !== 'wall'
+    && building.health > 0 && building.health < maxBuildingHealth(building) * 0.7 && !repairing.has(building))
+    .sort((a, b) => (b.type === 'command') - (a.type === 'command') || a.health / maxBuildingHealth(a) - b.health / maxBuildingHealth(b))[0];
+  if (!damaged) return;
+  const rover = colony.units.filter((unit) => unit.type === 'rover' && unit.health > 0 && unit.order?.kind !== 'build')
+    .sort((a, b) => distance(a, damaged) - distance(b, damaged))[0];
+  if (!rover) return;
+  setUnitOrder(rover, { kind: 'repair', building: damaged });
+  colony.lastAction = `Repairing ${BUILDINGS[damaged.type].name}`;
+}
+
+function towerSite(colony) {
+  const command = colony.buildings[0];
+  const rivals = [...colony.knownFactions].map((id) => colony.factions.get(id)).filter((rival) => rival && !rival.defeat);
+  const threat = rivals.sort((a, b) => distance(a.home, command) - distance(b.home, command))[0];
+  const facing = threat ? Math.atan2(threat.home.z - command.z, threat.home.x - command.x) : 0;
+  for (const radius of [7, 9.5, 12]) {
+    for (let step = 0; step < 12; step++) {
+      const angle = facing + (step % 2 ? 1 : -1) * Math.ceil(step / 2) * 0.55;
+      const site = buildingSite(colony, 'tower', { x: command.x + Math.cos(angle) * radius, z: command.z + Math.sin(angle) * radius });
+      if (!site.error) return site;
+    }
+  }
+  return null;
+}
+
+// Threatened or mature colonies upgrade Command and ring it with Defense Towers.
+function planDefenses(colony, rovers, threatened) {
+  const command = colony.buildings[0];
+  const tier = command.tier ?? 1;
+  const mature = colony.time > 900;
+  if (!threatened && !mature) return;
+  if (tier < 2 && !command.upgrade && canAfford(colony, COMMAND_TIERS[2].cost)) {
+    if (!orderCommandUpgrade(colony)) colony.lastAction = 'Upgrading Command to Tier II';
+    return;
+  }
+  if (tier < 2 || !rovers.length) return;
+  const towers = colony.buildings.filter((building) => building.type === 'tower');
+  const wanted = (threatened ? 2 : 1) + (colony.personality.military > 0.75 ? 1 : 0);
+  if (towers.length >= wanted || towers.some((tower) => tower.progress < 1) || !canAfford(colony, BUILDINGS.tower.cost)) return;
+  const site = towerSite(colony);
+  if (site && !orderBuilding(colony, 'tower', site, rovers.slice(0, 2))) colony.lastAction = 'Building a Defense Tower';
+}
+
 function planColony(colony) {
   if (colony.time < colony.nextDecision) return;
   colony.nextDecision = colony.time + 2;
@@ -1771,11 +1852,13 @@ function planColony(colony) {
   }
   const rates = production(colony);
   const builders = colony.units.filter((unit) => unit.type === 'rover' && !['build', 'repair'].includes(unit.order?.kind));
+  const threatened = colony.diplomacy.incidentsFor(colony.country).some(({ incident }) => incident.defender === colony.country)
+    || colony.diplomacy.warCount(colony.country) > 0;
+  planRepairs(colony);
+  planDefenses(colony, builders, threatened);
   planIndustry(colony, rates, builders);
   clearGroves(colony, builders);
   sendIdleRovers(colony);
-  const threatened = colony.diplomacy.incidentsFor(colony.country).some(({ incident }) => incident.defender === colony.country)
-    || colony.diplomacy.warCount(colony.country) > 0;
   planRecruits(colony, rates, threatened);
   planMilitary(colony);
   for (const unit of colony.units) {

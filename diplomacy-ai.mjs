@@ -44,7 +44,7 @@ export function intrusionScore(diplomacy, attacker, defender) {
   if (history.agreements && opinion >= -19 && !conquest) return -Infinity;
   const opportunity = diplomacy.rules.territorialValue(faction, opponent) * p.expansion;
   // A large standing army that has nothing to do makes aggressive leaders restless.
-  const restless = p.aggression * bound(Math.log2((diplomacy.rules.strength(faction) + 20) / 300), 0, 2) * 12;
+  const restless = p.aggression * bound(Math.log2((diplomacy.rules.strength(faction) + 20) / 150), 0, 2) * 12;
   return (p.aggression - 0.5) * 32 + (p.expansion - 0.5) * 30 + restless
     + advantage(diplomacy, attacker, defender) * (9 + p.risk * 8) + conquest + economy + opportunity
     - opinion * 0.35 - p.economy * p.diplomacy * 13 - history.agreements * (7 + p.trust * 11)
