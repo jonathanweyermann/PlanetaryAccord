@@ -1030,7 +1030,11 @@ function issueTerrainOrder(units, point, { clientX, clientY }, append) {
   if (rovers.length) {
     const candidates = game.units.filter((unit) => unit.type === 'rover' && unit.health > 0);
     const rover = view.entityAtModel(clientX, clientY, candidates) || entityUnder(clientX, clientY, candidates);
-    if (rover && rovers.some((unit) => unit !== rover)) {
+    // A rover standing on a deposit must not turn a harvest click into an assist order,
+    // and assisting a rover that is itself part of the selection is meaningless.
+    const overResource = rovers.length && (gatherableUnder(point, clientX, clientY)
+      || nearest(game.world.deposits.filter((item) => 'surface' in item && item.surface > 0), point, 2.15));
+    if (rover && !selected.has(rover.id) && !overResource && rovers.some((unit) => unit !== rover)) {
       const error = orderRoverAssist(game, rovers, rover, append);
       notice(error || (append ? 'Rover assistance queued.' : 'Rovers assigned to assist.'), Boolean(error));
       return !error;
