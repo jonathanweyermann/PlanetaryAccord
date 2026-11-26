@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { STANCE } from './diplomacy.mjs';
-import { evaluatePeaceOffer, intrusionScore, respondToPeaceOffer } from './diplomacy-ai.mjs';
+import { evaluatePeaceOffer, evaluateTradeOffer, intrusionScore, planTrade, respondToPeaceOffer } from './diplomacy-ai.mjs';
 import { addUnit, createGame, orderBuilding, orderFactionAttack, setUnitOrder, territoryOwner, updateGame } from './world.mjs';
 
 function setup(controllers = ['human', 'human', 'ai'], diplomacy = {}, personalities = []) {
@@ -293,4 +293,65 @@ test('an aggressive AI plans an intrusion only against a strategically viable in
   assert.equal(incursions.length, 3);
   assert(incursions.every(({ order }) => order.intentFaction === b.country));
   assert.equal(rules.between(a.country, c.country).state, STANCE.FRIENDLY);
+});
+
+const trade = (offered = {}, requested = {}) => ({ kind: 'trade', offered, requested });
+
+test('peaceful factions can trade without a ceasefire and goodwill accumulates', () => {
+  const { rules, a, b } = setup();
+  const pair = rules.between(a.country, b.country);
+  const { offer } = rules.propose(a.country, b.country, trade({ metal: 40 }, { food: 40 }));
+  assert.equal(offer.kind, 'trade');
+  assert.equal(rules.accept(b.country, a.country, offer.id), null);
+  assert.equal(a.resources.metal, 410);
+  assert.equal(b.resources.food, 140);
+  assert.equal(pair.state, STANCE.NEUTRAL);
+  assert.equal(pair.treaty, null);
+  assert.equal(pair.views.get(a.country).agreements, 1);
+  assert.equal(rules.opinion(b.country, a.country), 3);
+});
+
+test('trade proposals need peace and expire when ignored', () => {
+  const { game, rules, a, b } = setup();
+  rules.beginIncident(a.country, b.country, 'declaration');
+  assert.match(rules.propose(a.country, b.country, trade({ metal: 10 })).error, /peaceful/);
+  rules.withdraw(a.country, b.country);
+  assert.match(rules.propose(a.country, b.country, trade()).error, /Add resources/);
+  const { offer } = rules.propose(a.country, b.country, trade({ metal: 10 }, { food: 5 }));
+  ticks(game, rules.config.tradeOfferLifetime + 1);
+  assert.equal(offer.status, 'expired');
+  assert.equal(rules.pendingOffer(rules.between(a.country, b.country)), null);
+});
+
+test('AI accepts fair trades for scarce goods and refuses to give away what it lacks', () => {
+  const { rules, a, c } = setup();
+  c.resources.food = 20;
+  const fair = { from: a.country, to: c.country, ...trade({ food: 40 }, { metal: 40 }) };
+  assert.equal(evaluateTradeOffer(rules, fair).accepted, true);
+  const draining = { from: a.country, to: c.country, ...trade({ metal: 200 }, { food: 15 }) };
+  assert.equal(evaluateTradeOffer(rules, draining).accepted, false);
+  const lopsided = { from: a.country, to: c.country, ...trade({ biomass: 5 }, { metal: 120 }) };
+  assert.equal(evaluateTradeOffer(rules, lopsided).accepted, false);
+});
+
+test('an AI faction short of a resource plans a trade paid from its surplus', () => {
+  const { rules, a, c } = setup();
+  c.resources.food = 10;
+  c.resources.metal = 600;
+  const plan = planTrade(rules, c.country, a.country);
+  assert.equal(plan.kind, 'trade');
+  assert(plan.requested.food >= 10);
+  assert(plan.offered.metal > plan.requested.food * 0.85);
+  assert.equal(evaluateTradeOffer(rules, { from: c.country, to: a.country, ...plan }).accepted, true);
+});
+
+test('AI factions in contact trade on their own over time', () => {
+  const { game, rules, b, c } = setup(['human', 'ai', 'ai']);
+  rules.rules.contact(b.country, c.country);
+  b.resources.food = 10; b.resources.metal = 700;
+  c.resources.food = 400;
+  ticks(game, 200);
+  const pair = rules.between(b.country, c.country);
+  assert(pair.views.get(b.country).agreements >= 1);
+  assert(rules.opinion(c.country, b.country) > 0);
 });

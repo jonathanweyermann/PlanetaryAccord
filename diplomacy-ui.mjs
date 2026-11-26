@@ -1,5 +1,5 @@
-import { STANCE, opinionLabel } from './diplomacy.mjs';
-import { evaluatePeaceOffer, respondToPeaceOffer } from './diplomacy-ai.mjs';
+import { STANCE, TRADE_STANCES, isTrade, opinionLabel } from './diplomacy.mjs';
+import { evaluateOffer, respondToPeaceOffer } from './diplomacy-ai.mjs';
 import { RESOURCES } from './world.mjs';
 
 const element = (name) => document.getElementById(`diplomacy-${name}`);
@@ -48,8 +48,14 @@ export function createDiplomacyUI(getGame, openDialog) {
     offerFields.set(type, fields);
   }
 
+  const trading = () => {
+    const { pair } = pairContext();
+    return Boolean(pair && !pair.incident && TRADE_STANCES.includes(pair.state));
+  };
+
   function terms() {
-    const offer = { offered: {}, requested: {}, duration: Number(duration.value) * 60 };
+    const offer = trading() ? { kind: 'trade', offered: {}, requested: {} }
+      : { offered: {}, requested: {}, duration: Number(duration.value) * 60 };
     for (const [type, [offered, requested]] of offerFields) {
       if (offered.value !== '') offer.offered[type] = Number(offered.value);
       if (requested.value !== '') offer.requested[type] = Number(requested.value);
@@ -71,7 +77,7 @@ export function createDiplomacyUI(getGame, openDialog) {
       likelihood.textContent = error;
       likelihood.dataset.status = 'invalid';
     } else if (diplomacy.factions.get(other).controller === 'ai') {
-      const { accepted, reason } = evaluatePeaceOffer(diplomacy, offer);
+      const { accepted, reason } = evaluateOffer(diplomacy, offer);
       likelihood.textContent = `${accepted ? 'Likely to accept' : 'Likely to decline'}. ${reason}`;
       likelihood.dataset.status = accepted ? 'accepted' : 'rejected';
     } else {
@@ -88,7 +94,8 @@ export function createDiplomacyUI(getGame, openDialog) {
     const { incident, treaty, state, lastOffer } = pair;
     const pending = diplomacy.pendingOffer(pair);
     const negotiating = Boolean(incident);
-    const mayOffer = (negotiating || state === STANCE.WAR) && !pending;
+    const peaceful = !negotiating && TRADE_STANCES.includes(state);
+    const mayOffer = (negotiating || state === STANCE.WAR || peaceful) && !pending;
     const score = diplomacy.opinion(other, country);
     element('state').textContent = treaty ? `${state} · ${clock(treaty.endsAt - diplomacy.time)} remaining` : state;
     element('state').dataset.state = state;
@@ -112,18 +119,26 @@ export function createDiplomacyUI(getGame, openDialog) {
     element('escalate').disabled = pair.factions.some((id) => diplomacy.warCount(id) >= diplomacy.config.maxWars);
     element('escalate').title = element('escalate').disabled ? 'A faction has reached its simultaneous war limit.' : '';
     element('deal').hidden = !mayOffer || offerFor === other;
+    element('deal').textContent = peaceful ? 'Propose Trade' : 'Reach a Deal';
+    element('form-title').textContent = peaceful ? 'Trade proposal' : 'Ceasefire offer';
+    element('duration-field').hidden = peaceful;
+    duration.required = !peaceful;
     element('pending').hidden = !pending;
     if (pending) {
       const incoming = pending.to === country;
-      element('offer-title').textContent = incoming ? `Ceasefire offer from ${diplomacy.name(other)}` : 'Awaiting a decision';
-      element('offer-summary').textContent = `${diplomacy.name(pending.from)} offers ${describeResources(pending.offered)} and requests ${describeResources(pending.requested)}. Ceasefire duration ${clock(pending.duration)}.`;
+      const trade = isTrade(pending);
+      element('offer-title').textContent = incoming ? `${trade ? 'Trade proposal' : 'Ceasefire offer'} from ${diplomacy.name(other)}` : 'Awaiting a decision';
+      element('offer-summary').textContent = `${diplomacy.name(pending.from)} offers ${describeResources(pending.offered)} and requests ${describeResources(pending.requested)}. `
+        + (trade ? `Expires in ${clock(pending.expiresAt - diplomacy.time)}.` : `Ceasefire duration ${clock(pending.duration)}.`);
       element('offer-actions').hidden = !incoming;
     }
     if (!mayOffer) offerFor = null;
     form.hidden = !mayOffer || offerFor !== other;
     if (!form.hidden) renderLikelihood();
     const outcome = lastOffer?.status === 'rejected' ? `Offer declined. ${lastOffer.reason}`
-      : lastOffer?.status === 'accepted' && treaty ? 'Offer accepted. The ceasefire is in effect.' : '';
+      : lastOffer?.status === 'accepted' && isTrade(lastOffer) ? 'Trade completed. Resources exchanged.'
+        : lastOffer?.status === 'expired' ? 'The trade proposal expired.'
+          : lastOffer?.status === 'accepted' && treaty ? 'Offer accepted. The ceasefire is in effect.' : '';
     const message = element('feedback');
     const text = feedback || outcome;
     message.hidden = !text;

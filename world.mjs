@@ -1771,8 +1771,9 @@ function planColony(colony) {
   planMilitary(colony);
   for (const unit of colony.units) {
     if (unit.type === 'rover' || unit.order) continue;
-    const radius = unit.type === 'scout' ? 22 : 10;
-    const angle = Math.floor(colony.time / 2) + unit.id * 2.4;
+    // Scouts range steadily farther from home so AI colonies eventually meet their neighbours.
+    const radius = unit.type === 'scout' ? Math.min(MAP_MAX_X * 0.9, 22 + Math.max(0, colony.time - 90) * 0.12) : 10;
+    const angle = Math.floor(colony.time / (unit.type === 'scout' ? 9 : 2)) * (unit.type === 'scout' ? 0.9 : 1) + unit.id * 2.4;
     const point = { x: clamp(colony.home.x + Math.cos(angle) * radius, MAP_MIN_X, MAP_MAX_X),
       z: clamp(colony.home.z + Math.sin(angle) * radius, MAP_MIN_Z, MAP_MAX_Z) };
     if (colony.world.navigation.intersects(point, point, unitClearance(unit.type))) continue;

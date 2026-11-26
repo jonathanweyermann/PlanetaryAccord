@@ -1,4 +1,4 @@
-import { STANCE, bound } from './diplomacy.mjs';
+import { STANCE, TRADE_STANCES, bound, isTrade } from './diplomacy.mjs';
 
 export const PERSONALITIES = Object.freeze({
   balanced: { aggression: 0.42, expansion: 0.4, economy: 0.65, military: 0.5, diplomacy: 0.65, risk: 0.45, trust: 0.7 },
@@ -81,9 +81,34 @@ export function evaluatePeaceOffer(diplomacy, offer) {
   return { accepted: false, reason };
 }
 
+// Values a peacetime exchange from the receiver's point of view: scarce goods are worth more,
+// parting with scarce goods costs more, and goodwill shifts the threshold a little.
+export function evaluateTradeOffer(diplomacy, offer) {
+  const { from, to, offered, requested } = offer;
+  const receiver = diplomacy.factions.get(to);
+  const p = receiver.personality;
+  const history = diplomacy.between(from, to).views.get(to);
+  const weigh = (amounts, pressure) => Object.entries(amounts).reduce((value, [type, amount]) =>
+    value + tradeValue({ [type]: amount }) * (1 + stockPressure(receiver, type) * pressure), 0);
+  const receiveValue = weigh(offered, 0.9);
+  const payValue = weigh(requested, 1.7);
+  const short = Object.keys(requested).find((type) => (requested[type] ?? 0) > 0
+    && receiver.resources[type] - requested[type] < (STOCK_TARGET[type] ?? 100) * 0.35);
+  const score = receiveValue - payValue * (1.12 - p.economy * 0.12) + history.score * 0.12 + p.diplomacy * 4
+    - history.treatyViolations * 15;
+  if (history.score <= -60) return { accepted: false, reason: 'The faction refuses to trade with a hostile rival.' };
+  if (short) return { accepted: false, reason: `The faction cannot spare that much ${diplomacy.rules.resourceName(short).toLowerCase()}.` };
+  if (score >= 2) return { accepted: true, reason: receiveValue > payValue * 1.3 ? 'A generous exchange.' : 'A fair exchange for both colonies.' };
+  return { accepted: false, reason: payValue > 0 && receiveValue < payValue ? 'The exchange favours your colony too heavily.' : 'The faction sees little value in this exchange.' };
+}
+
+export function evaluateOffer(diplomacy, offer) {
+  return isTrade(offer) ? evaluateTradeOffer(diplomacy, offer) : evaluatePeaceOffer(diplomacy, offer);
+}
+
 export function respondToPeaceOffer(diplomacy, offer) {
   if (diplomacy.factions.get(offer.to).controller !== 'ai') return null;
-  const result = evaluatePeaceOffer(diplomacy, offer);
+  const result = evaluateOffer(diplomacy, offer);
   return result.accepted
     ? diplomacy.accept(offer.to, offer.from, offer.id)
     : diplomacy.reject(offer.to, offer.from, offer.id, result.reason);
@@ -165,6 +190,58 @@ function resolveDefender(diplomacy, pair, aggressor, defender) {
   diplomacy.demandWithdrawal(ours, theirs);
 }
 
+export const TRADE_INTERVAL = 75;
+
+// Deterministic 0..1 jitter so trade timing varies between pairs without breaking replayable simulations.
+function jitter(...parts) {
+  let hash = 2166136261;
+  for (const char of parts.join(':')) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return (hash >>> 0) / 4294967296;
+}
+
+// Picks the resource this faction most needs and pays with its largest surplus, adding a
+// small premium so a partner that is not short of the payment is likely to agree.
+export function planTrade(diplomacy, from, to) {
+  const faction = diplomacy.factions.get(from);
+  const partner = diplomacy.factions.get(to);
+  const types = Object.keys(PRICE).filter((type) => type in faction.resources && type in partner.resources);
+  const spare = (owner, type) => owner.resources[type] - (STOCK_TARGET[type] ?? 100) * 1.3;
+  const needs = types.map((type) => ({ type, pressure: stockPressure(faction, type) }))
+    .filter(({ pressure }) => pressure >= 0.35).sort((a, b) => b.pressure - a.pressure);
+  for (const need of needs) {
+    const pay = types.filter((type) => type !== need.type && spare(faction, type) > 0)
+      .sort((a, b) => spare(faction, b) * PRICE[b] - spare(faction, a) * PRICE[a])[0];
+    const available = Math.floor(Math.max(0, partner.resources[need.type] - (STOCK_TARGET[need.type] ?? 100) * 0.6));
+    if (!pay || available < 10) continue;
+    const want = Math.min(available, Math.ceil((STOCK_TARGET[need.type] ?? 100) * need.pressure * 0.6), 60);
+    const premium = 1.15 + faction.personality.diplomacy * 0.15;
+    const price = Math.ceil(want * PRICE[need.type] * premium / PRICE[pay]);
+    if (price > spare(faction, pay) || want < 10) continue;
+    return { kind: 'trade', offered: { [pay]: price }, requested: { [need.type]: want } };
+  }
+  return null;
+}
+
+function seekTrade(diplomacy, pair) {
+  if (diplomacy.pendingOffer(pair) || pair.incident || !TRADE_STANCES.includes(pair.state)) return;
+  const key = pair.factions.join('|');
+  if (diplomacy.time < (pair.nextTrade ??= diplomacy.time + TRADE_INTERVAL * (0.5 + jitter(key)))) return;
+  const roll = jitter(key, Math.floor(diplomacy.time));
+  pair.nextTrade = diplomacy.time + TRADE_INTERVAL * (0.75 + roll * 0.5);
+  const order = roll < 0.5 ? pair.factions : [...pair.factions].reverse();
+  for (const [index, id] of order.entries()) {
+    const faction = diplomacy.factions.get(id);
+    const other = pair.factions.find((candidate) => candidate !== id);
+    if (faction.controller !== 'ai' || !faction.knownFactions?.has(other)) continue;
+    if (diplomacy.opinion(id, other) <= -40 || jitter(key, id, Math.floor(diplomacy.time), index) > 0.35 + faction.personality.economy * 0.5) continue;
+    const terms = planTrade(diplomacy, id, other);
+    if (!terms) continue;
+    const { offer } = diplomacy.propose(id, other, terms);
+    if (offer) respondToPeaceOffer(diplomacy, offer);
+    return;
+  }
+}
+
 export function advanceDiplomaticAI(diplomacy) {
   for (const pair of diplomacy.pairs.values()) {
     const offer = diplomacy.pendingOffer(pair);
@@ -172,6 +249,7 @@ export function advanceDiplomaticAI(diplomacy) {
       respondToPeaceOffer(diplomacy, offer);
       if (diplomacy.pendingOffer(pair)) continue;
     }
+    seekTrade(diplomacy, pair);
     const incident = pair.incident;
     if (incident) {
       if (diplomacy.time < incident.openedAt + Math.min(3, diplomacy.config.gracePeriod * 0.15)) continue;

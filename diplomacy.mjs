@@ -6,12 +6,15 @@ export const STANCE = Object.freeze({
 
 export const DIPLOMACY_DEFAULTS = Object.freeze({
   gracePeriod: 30, ceasefireDuration: 600, minCeasefire: 60, maxCeasefire: 1800,
-  incidentCooldown: 90, maxWars: 2,
+  incidentCooldown: 90, maxWars: 2, tradeOfferLifetime: 60,
   modifiers: Object.freeze({
     mutuallyBeneficialTrade: 3, generousTrade: 10, peace: 5, honouredCeasefire: 5,
     incursion: -10, militaryLoss: -5, buildingLoss: -15, declaration: -20, treatyViolation: -40,
   }),
 });
+
+export const TRADE_STANCES = Object.freeze([STANCE.NEUTRAL, STANCE.FRIENDLY, STANCE.ALLIED, STANCE.CEASEFIRE]);
+export const isTrade = (offer) => offer?.kind === 'trade';
 
 export const bound = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -89,6 +92,11 @@ export class Diplomacy {
     if (pair.incident) return null;
     if (cause === 'border' && pair.cooldownUntil > this.time) return 'A diplomatic cooldown is in effect.';
 
+    if (pair.warOffer) {
+      pair.warOffer.status = 'closed';
+      pair.lastOffer = pair.warOffer;
+      pair.warOffer = null;
+    }
     pair.incident = {
       id: this.nextId++, aggressor, defender, cause, deliberate, openedAt: this.time,
       deadline: this.time + this.config.gracePeriod, demand: null, offer: null,
@@ -167,9 +175,14 @@ export class Diplomacy {
 
   validateOffer(from, to, terms) {
     const pair = this.between(from, to);
-    if (!pair?.incident && pair?.state !== STANCE.WAR) return 'A ceasefire offer requires an incident or an active war.';
     const { duration, offered, requested } = terms ?? {};
-    if (!Number.isFinite(duration) || duration < this.config.minCeasefire || duration > this.config.maxCeasefire) {
+    if (isTrade(terms)) {
+      if (!pair || pair.incident || !TRADE_STANCES.includes(pair.state)) return 'Trade requires peaceful relations.';
+      const total = (amounts) => Object.values(amounts ?? {}).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
+      if (!total(offered) && !total(requested)) return 'Add resources to the trade.';
+    } else if (!pair?.incident && pair?.state !== STANCE.WAR) {
+      return 'A ceasefire offer requires an incident or an active war.';
+    } else if (!Number.isFinite(duration) || duration < this.config.minCeasefire || duration > this.config.maxCeasefire) {
       return 'Choose a ceasefire duration within the displayed limits.';
     }
     for (const [id, amounts] of [[from, offered], [to, requested]]) {
@@ -198,11 +211,13 @@ export class Diplomacy {
     if (error) return { error };
     const pair = this.between(from, to);
     if (this.pendingOffer(pair)) return { error: 'Resolve the pending offer before sending another.' };
+    const trade = isTrade(terms);
     const offer = { id: this.nextId++, from, to, duration: terms.duration,
       offered: { ...terms.offered }, requested: { ...terms.requested }, status: 'pending' };
+    if (trade) Object.assign(offer, { kind: 'trade', expiresAt: this.time + this.config.tradeOfferLifetime });
     this.saveOffer(pair, offer);
     pair.lastOffer = offer;
-    this.announce(pair, `${this.name(from)} sent a ceasefire offer to ${this.name(to)}.`);
+    this.announce(pair, `${this.name(from)} sent a ${trade ? 'trade proposal' : 'ceasefire offer'} to ${this.name(to)}.`);
     return { offer };
   }
 
@@ -214,7 +229,7 @@ export class Diplomacy {
     offer.reason = reason;
     pair.views.get(other).rejectedOffers++;
     this.saveOffer(pair, null);
-    this.announce(pair, `${this.name(actor)} declined a ceasefire offer. ${reason}`);
+    this.announce(pair, `${this.name(actor)} declined a ${isTrade(offer) ? 'trade proposal' : 'ceasefire offer'}. ${reason}`);
     return null;
   }
 
@@ -238,15 +253,22 @@ export class Diplomacy {
     }
     offer.status = 'accepted';
     this.saveOffer(pair, null);
-    this.closeIncident(pair);
+    const trade = isTrade(offer);
+    if (!trade) this.closeIncident(pair);
     for (const id of pair.factions) {
-      this.changeOpinion(pair, id, 'peace');
+      if (!trade) this.changeOpinion(pair, id, 'peace');
       pair.views.get(id).agreements++;
     }
     if (giving > 0 && taking > 0 && Math.max(giving, taking) <= Math.min(giving, taking) * 1.5) {
       for (const id of pair.factions) this.changeOpinion(pair, id, 'mutuallyBeneficialTrade');
     } else if (giving - taking >= 15) this.changeOpinion(pair, actor, 'generousTrade');
     else if (taking - giving >= 15) this.changeOpinion(pair, other, 'generousTrade');
+    if (trade) {
+      pair.lastTrade = this.time;
+      if (pair.state !== STANCE.CEASEFIRE) pair.state = this.peacefulState(pair);
+      this.announce(pair, `${this.name(actor)} and ${this.name(other)} completed a trade.`);
+      return null;
+    }
     this.setCeasefire(pair, offer.duration);
     this.announce(pair, `${this.name(actor)} and ${this.name(other)} agreed to a ceasefire.`);
     return null;
@@ -275,6 +297,11 @@ export class Diplomacy {
         for (const id of pair.factions) this.changeOpinion(pair, id, 'honouredCeasefire');
         pair.state = this.peacefulState(pair);
         this.announce(pair, 'The ceasefire expired. Peaceful relations continue.');
+      }
+      if (isTrade(pair.warOffer) && time >= pair.warOffer.expiresAt) {
+        pair.warOffer.status = 'expired';
+        pair.lastOffer = pair.warOffer;
+        pair.warOffer = null;
       }
       const incident = pair.incident;
       if (!incident) continue;
