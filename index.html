@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101919">
+  <meta name="description" content="A real-time strategy prototype about establishing a colony on a procedural planet.">
+  <title>Planetary Accord · Kestrel Basin</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" class="icon-library" aria-hidden="true">
+    <symbol id="i-emblem" viewBox="0 0 32 32"><path d="M16 2.5 28 9v14L16 29.5 4 23V9Z"/><path d="m4 9 12 7 12-7M16 16v13.5M10 5.8l12 6.7M10 12.5 22 5.8"/></symbol>
+    <symbol id="i-metal" viewBox="0 0 24 24"><path d="m8 5 8 0 4 7-4 7H8l-4-7Z"/><path d="m8 5 4 7 8 0m-8 0-4 7"/></symbol>
+    <symbol id="i-biomass" viewBox="0 0 24 24"><path d="M19 4c0 4 2 10-4 14a6 6 0 0 1-8-8C10 6 15 7 19 4ZM5 20l9-9"/></symbol>
+    <symbol id="i-food" viewBox="0 0 24 24"><path d="M12 21V4m0 12c-4 0-6-2-6-5 3 0 6 2 6 5Zm0 3c4 0 6-2 6-5-3 0-6 2-6 5ZM12 8C10 7 9 6 9 4c2 0 3 1 3 4Zm0 4c3 0 5-2 5-4-3 0-5 2-5 4Z"/></symbol>
+    <symbol id="i-energy" viewBox="0 0 24 24"><path d="m13 3-8 11h6l-1 7 9-11h-6l1-7Z"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="7" r="3"/><path d="M3 19v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2Zm13-15a3 3 0 0 1 0 6m2 3a4 4 0 0 1 3 4v2h-3"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14m6-14v14" stroke-width="2.6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7m-2-1v12h-5v-7h-4v7H5V9"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="7"/><path d="m9 15 2-5 4-1-1 4Z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5Zm-9 9 9 5 9-5m-18 4 9 5 9-5"/></symbol>
+    <symbol id="i-mine" viewBox="0 0 24 24"><path d="m7 20 7-15 3 2-7 13m-6-1 16 0M5 8c4-4 8-5 14-2l2 4c-5-3-10-3-15 0Z"/></symbol>
+    <symbol id="i-solar" viewBox="0 0 24 24"><path d="m5 5 14 0 3 12H2Zm5 0-1 12m5-12 1 12M3 11h18m-9 6v4m-5 0h10"/></symbol>
+    <symbol id="i-habitat" viewBox="0 0 24 24"><path d="M4 20V8l5-4h7l4 4v12Zm0-12h16m-10 12v-6h4v6"/></symbol>
+    <symbol id="i-farm" viewBox="0 0 24 24"><path d="M3 17c5-4 13-4 18 0M3 21c5-4 13-4 18 0M12 14V5m0 5C8 10 6 8 6 5c4 0 6 2 6 5Zm0 1c4 0 6-2 6-5-4 0-6 2-6 5Z"/></symbol>
+    <symbol id="i-rover" viewBox="0 0 24 24"><path d="M4 12h16l2 3v3H2v-3Zm2 0 2-5h7l3 5M6 18v2m12-2v2M10 7V5h5"/><path d="M5 15h2m10 0h2"/></symbol>
+    <symbol id="i-scout" viewBox="0 0 24 24"><path d="m12 3 7 13-7-3-7 3Zm-8 14v3m16-3v3m-8-4v4"/></symbol>
+    <symbol id="i-infantry" viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4-3 8-7 10-4-2-7-6-7-10V6Z"/><path d="M8 11h8m-4-4v8"/></symbol>
+    <symbol id="i-orders" viewBox="0 0 24 24"><path d="M8 4H4v16h16V4h-4m-8 0V2h8v5H8Zm0 8 2 2 5-5m-7 8h8"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14m-7-7v14"/></symbol>
+    <symbol id="i-radio" viewBox="0 0 24 24"><path d="M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/><circle cx="12" cy="12" r="2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16M9 4v4m6 2v4m-6 2v4"/></symbol>
+    <symbol id="i-factory" viewBox="0 0 24 24"><path d="M3 20V9l6 3V8l6 3v-1l2-6h3l1 16H3Zm4-4h2m4 0h2m4 0h1"/></symbol>
+    <symbol id="i-tower" viewBox="0 0 24 24"><path d="M8 21h8m-6 0 1-11m3 11-1-11M7 10V6l5-3 5 3v4H7Zm10-2h5"/></symbol>
+    <symbol id="i-wall" viewBox="0 0 24 24"><path d="M3 5h18v14H3zm0 7h18M9 5v7m6 0v7"/></symbol>
+    <symbol id="i-convert" viewBox="0 0 24 24"><path d="M4 8h15m-4-4 4 4-4 4m5 4H5m4-4-4 4 4 4"/></symbol>
+    <symbol id="i-label" viewBox="0 0 24 24"><path d="M3 5h11l7 7-7 7H3zm5 4v6m0-3h5"/></symbol>
+    <symbol id="i-crystal" viewBox="0 0 24 24"><path d="m12 2 6 6-1 10-5 4-5-4L6 8Zm0 0v20M6 8l6 4 6-4"/></symbol>
+  </svg>
+
+  <main id="game" class="game" aria-label="Planetary Accord game">
+    <canvas id="world" aria-label="World map" aria-description="Double-click a unit to select nearby units of the same type."></canvas>
+    <div id="map-labels" aria-hidden="true"></div>
+    <div class="map-shade" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand"><svg class="icon brand-mark"><use href="#i-emblem"/></svg><div><strong>PLANETARY <span>ACCORD</span></strong><small>COLONY COMMAND</small></div></div>
+      <div id="resources" class="resources" aria-label="Colony resources"></div>
+      <div class="time-controls" aria-label="Simulation controls">
+        <div class="clock"><span class="clock-dot"></span><time id="clock">00:00</time></div>
+        <button id="pause" class="icon-button" title="Pause / resume (Space)" aria-label="Pause simulation"><svg class="icon"><use href="#i-pause"/></svg></button>
+        <button id="speed" class="speed-button" title="Change simulation speed">1<i>×</i></button>
+        <button id="tech-open" class="icon-button" title="Technology tree (T)" aria-label="Technology tree"><svg class="icon"><use href="#i-layers"/></svg></button>
+        <button id="diplomacy-open" class="icon-button diplomacy-open" title="Diplomacy" aria-label="Diplomacy"><svg class="icon"><use href="#i-radio"/></svg><small id="diplomacy-alerts" hidden></small></button>
+        <button id="building-names" class="icon-button name-toggle" type="button" title="Show building names" aria-label="Building names" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-label"/></svg><span>Names</span></button>
+        <button id="settings" class="icon-button" title="World settings" aria-label="World settings"><svg class="icon"><use href="#i-settings"/></svg></button>
+      </div>
+    </header>
+
+    <div id="viewport" class="viewport">
+      <section class="sector" aria-label="Current sector">
+        <div class="sector-tag"><span></span> LANDING ZONE</div>
+        <h1 id="sector-name">Kestrel Basin</h1>
+        <p>SEED <span id="seed-label"></span><b></b><span id="terrain-label">FERTILE PLAINS</span><b></b><span id="territory-label"></span></p>
+        <p id="terrain-advantage" class="terrain-advantage"></p>
+      </section>
+      <aside class="ops" aria-label="Mission objectives and event log">
+        <section id="mission-guide" class="card mission" aria-labelledby="guide-title">
+          <header class="card-head"><svg class="icon"><use href="#i-orders"/></svg><h2 id="guide-title">Mission guide</h2><span id="objective-count"></span></header>
+          <div id="guide-phases" class="guide-phases" aria-label="Mission phases"></div>
+          <div class="guide-current">
+            <p id="guide-phase"></p>
+            <h3 id="guide-lesson" aria-live="polite"></h3>
+            <p id="guide-instruction"></p>
+            <p id="guide-status"></p>
+            <button id="guide-locate" type="button" hidden></button>
+          </div>
+          <details id="guide-checklist">
+            <summary>Chapter checklist</summary>
+            <ol id="objectives" class="objectives"></ol>
+          </details>
+        </section>
+        <section id="neighbor-debug" class="card neighbor-debug" hidden>
+          <header class="card-head"><svg class="icon"><use href="#i-compass"/></svg><h2 id="neighbor-name"></h2><span id="neighbor-status" aria-live="polite"></span></header>
+          <div class="neighbor-data">
+            <strong id="neighbor-metrics"></strong>
+            <span id="neighbor-supply" title="Metal, biomass, food, and energy"></span>
+            <span id="neighbor-action"></span>
+            <div class="neighbor-contact"><span id="neighbor-contact"></span><button id="neighbor-inspect" type="button" title="Center on the colony and run a short visibility survey" hidden>Inspect</button></div>
+          </div>
+        </section>
+        <section class="card telemetry">
+          <header class="card-head"><svg class="icon"><use href="#i-radio"/></svg><h2>Field log</h2><span class="live-dot" title="Live events"></span></header>
+          <div id="log" class="event-log" role="log" aria-live="polite"></div>
+        </section>
+      </aside>
+      <div class="lower-map">
+        <section class="minimap-panel" aria-label="Overview map">
+          <header><svg class="icon"><use href="#i-compass"/></svg> SECTOR MAP <span>N</span></header>
+          <canvas id="minimap" width="320" height="320" aria-label="Sector map. Click to move the camera. Right-click to set a waypoint. Shift-right-click to queue a waypoint." title="Click to move camera · Right-click for waypoint · Shift-right-click to queue" tabindex="0"></canvas>
+        </section>
+        <div class="camera-tools" role="group" aria-label="Map controls">
+          <button id="idle-workers" class="icon-button idle-workers" type="button" title="Idle workers · Click to select the closest to the camera · Double-click to select all" aria-label="No idle workers" disabled><svg class="icon" aria-hidden="true"><use href="#i-rover"/></svg><span class="idle-worker-count" id="idle-worker-count" aria-hidden="true">0</span></button>
+          <button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><svg class="icon"><use href="#i-plus"/></svg></button>
+          <button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><svg class="icon"><use href="#i-minus"/></svg></button>
+          <button id="camera-home" class="icon-button" title="Center on Command (H)" aria-label="Center on Command"><svg class="icon"><use href="#i-home"/></svg></button>
+        </div>
+      </div>
+      <div id="selection-box" class="selection-box" hidden></div>
+      <div id="placement-hint" class="placement-hint" hidden></div>
+      <div id="toast" class="toast" role="status" hidden></div>
+      <div id="load-error" class="load-error" role="alert" hidden></div>
+    </div>
+
+    <section class="command-deck" aria-label="Colony controls">
+      <div class="selection-panel">
+        <div class="selection-head"><span id="selection-type">SELECTION</span><button id="select-rovers" type="button" title="Select all Construction Rovers (R)">Select rovers <kbd>R</kbd></button></div>
+        <div class="selection-content" id="selected-unit"></div>
+      </div>
+      <div class="action-panel">
+        <div class="action-head"><span id="action-title">CONSTRUCTION</span><span class="production-controls"><span id="build-tiers" class="build-tiers" role="group" aria-label="Construction tier"><button type="button" data-tier="1" aria-label="Tier 1">I</button><button type="button" data-tier="2" aria-label="Tier 2">II</button><button type="button" data-tier="3" aria-label="Tier 3">III</button></span><span id="action-status"></span><button id="repeat-production" type="button" aria-pressed="false" hidden><span aria-hidden="true">↻</span> Repeat</button></span></div>
+        <div id="actions" class="actions" aria-label="Construction or training actions"></div>
+      </div>
+      <div class="squad-panel">
+        <div class="action-head"><span>QUICK SELECT</span></div>
+        <div id="squad" class="squad" aria-label="Quick unit selection"></div>
+      </div>
+      <div id="training-queue" class="training-queue" role="group" aria-label="Unit training queue" hidden></div>
+    </section>
+    <footer class="controls-footer"><span><kbd>LMB</kbd> Select <b></b> <kbd>RMB</kbd> Order <b></b> <kbd>SHIFT+RMB</kbd> Queue <span class="desktop-controls"><b></b> <kbd>B</kbd> Build <b></b> <kbd>WASD / EDGE</kbd> Pan <b></b> <kbd>SCROLL</kbd> Zoom</span></span><span id="colony-status"><i></i> COMMAND ONLINE</span></footer>
+  </main>
+
+  <dialog id="defeat-dialog" class="world-dialog" aria-labelledby="defeat-title">
+    <form method="dialog">
+      <header><h2 id="defeat-title">Colony defeated</h2></header>
+      <p id="defeat-summary"></p>
+      <button id="defeat-restart" class="generate" type="button">Start a new colony</button>
+    </form>
+  </dialog>
+
+  <dialog id="diplomacy-dialog" class="world-dialog diplomacy-dialog" aria-labelledby="diplomacy-title">
+    <form method="dialog" class="diplomacy-header">
+      <header><h2 id="diplomacy-title">Diplomacy</h2><button class="icon-button dialog-close" type="submit" aria-label="Close diplomacy">×</button></header>
+    </form>
+    <div class="diplomacy-content">
+      <p id="diplomacy-empty">Make contact with another faction to open diplomatic channels.</p>
+      <section id="diplomacy-faction" hidden>
+        <label class="diplomacy-counterpart">Faction <select id="diplomacy-peer"></select></label>
+        <div class="diplomacy-status"><strong id="diplomacy-state"></strong><span id="diplomacy-opinion"></span></div>
+        <div id="diplomacy-incident" class="diplomacy-incident" hidden>
+          <h3>Conditions for War Have Occurred</h3>
+          <p id="diplomacy-incident-summary"></p>
+          <p id="diplomacy-demand" hidden></p>
+        </div>
+        <div class="diplomacy-buttons">
+          <button id="diplomacy-deal" type="button" hidden>Reach a Deal</button>
+          <button id="diplomacy-withdraw" type="button" hidden>Withdraw Forces</button>
+          <button id="diplomacy-demand-withdrawal" type="button" hidden>Demand Withdrawal</button>
+          <button id="diplomacy-escalate" class="diplomacy-danger" type="button" hidden>Proceed to War</button>
+          <button id="diplomacy-declare" class="diplomacy-danger" type="button" hidden>Declare War…</button>
+        </div>
+        <section id="diplomacy-pending" class="diplomacy-offer" hidden>
+          <h3 id="diplomacy-offer-title"></h3>
+          <p id="diplomacy-offer-summary"></p>
+          <div id="diplomacy-offer-actions" class="diplomacy-buttons" hidden>
+            <button id="diplomacy-accept" type="button">Accept Offer</button>
+            <button id="diplomacy-reject" type="button">Decline Offer</button>
+          </div>
+        </section>
+        <form id="peace-form" class="diplomacy-offer" hidden>
+          <h3>Ceasefire offer</h3>
+          <div class="diplomacy-resources" id="diplomacy-resources"></div>
+          <label class="diplomacy-duration">Ceasefire duration (minutes) <input id="diplomacy-duration" type="number" value="10" required></label>
+          <p id="diplomacy-likelihood" class="diplomacy-likelihood"></p>
+          <div class="diplomacy-buttons"><button type="submit">Send Offer</button><button id="diplomacy-cancel-offer" type="button">Close Offer Form</button></div>
+        </form>
+        <p id="diplomacy-feedback" class="diplomacy-feedback" aria-live="polite" hidden></p>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="tech-dialog" class="world-dialog tech-dialog" aria-labelledby="tech-title">
+    <form method="dialog">
+      <header><h2 id="tech-title">Technology tree</h2><button class="icon-button dialog-close" type="submit" aria-label="Close technology tree">×</button></header>
+      <p>Upgrade Command to unlock new blueprints. Extract crystal and geothermal charge in Tier II to build your orbital program.</p>
+      <p id="tech-message" class="tech-message" role="status" hidden></p>
+      <div id="tech-tree" class="tech-tree"></div>
+    </form>
+  </dialog>
+
+  <dialog id="world-dialog" class="world-dialog">
+    <form method="dialog" id="world-form">
+      <header><h2>World settings</h2><button class="icon-button dialog-close" type="submit" value="cancel" formnovalidate aria-label="Close settings">×</button></header>
+      <label class="guide-setting"><input id="guide-enabled" type="checkbox" checked> Show mission guide</label>
+      <label class="guide-setting"><input id="siting-guide" type="checkbox" checked> Highlight high-yield building sites</label>
+      <label class="guide-setting"><input id="sound-effects" type="checkbox" checked> Sound effects</label>
+      <label class="guide-setting"><input id="music" type="checkbox" checked> Music</label>
+      <p>Generate another landing zone. This starts a fresh colony.</p>
+      <label for="new-seed">World seed</label>
+      <div class="seed-input"><input id="new-seed" type="number" min="0" max="4294967295" required><button type="button" id="random-seed">Randomize</button></div>
+      <button type="submit" value="generate" class="generate">Generate world</button>
+    </form>
+  </dialog>
+  <script type="module">
+    import('./main.mjs').catch((error) => {
+      console.error(error);
+      const message = document.getElementById('load-error');
+      message.textContent = 'The game files could not load. Reload the page to fetch them again.';
+      message.hidden = false;
+    });
+  </script>
+</body>
+</html>
