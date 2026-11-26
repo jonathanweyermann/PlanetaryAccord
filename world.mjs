@@ -188,6 +188,7 @@ export function createGame(seed, options = {}) {
   const diplomacy = new Diplomacy(factions, {
     log, strength: militaryStrength, value: tradeValue, territorialValue, resources: Object.keys(RESOURCES),
     resourceName: (type) => RESOURCES[type].name.toLowerCase(),
+    commandIntegrity: (id) => { const command = factions.get(id).buildings[0]; return command ? command.health / maxBuildingHealth(command) : 0; },
     contact: (a, b) => {
       factions.get(a).knownFactions.add(b);
       factions.get(b).knownFactions.add(a);
@@ -974,12 +975,15 @@ function militaryStrength(state) {
   }, 0);
 }
 
+// How tempting a rival's deposits are. Distance is judged relative to how far apart the two
+// colonies are, so deposits on the near side of a distant rival's territory still count.
 function territorialValue(state, other) {
+  const gap = Math.max(35, distance(state.home, other.home));
   let value = 0;
   for (const site of state.world.deposits) {
     if (!site.amount || territoryOwner(state.world, site) !== other.country) continue;
-    const distanceFromHome = distance(state.home, site);
-    value += Math.max(0, 2 - distanceFromHome / 35) * (state.resources[site.type] < 80 ? 1 : 0.4);
+    const reach = distance(state.home, site) / gap;
+    value += Math.max(0, 1.6 - reach) * (state.resources[site.type] < 80 ? 1 : 0.4);
   }
   return Math.min(value, 12);
 }
@@ -1424,6 +1428,11 @@ function checkDefeat(colony) {
   log(colony, 'Colony defeated. Command is disabled and no Construction Rovers remain.');
   const victor = colony.factions.get(colony.defeat.by);
   if (victor) log(victor, `${colony.name} has been defeated. Your forces have stood down.`);
+  for (const other of colony.factions.values()) {
+    if (other !== colony && other !== victor && other.knownFactions.has(colony.country)) {
+      log(other, `News: ${colony.name} has fallen${victor ? ` to ${victor.name}` : ''}.`);
+    }
+  }
 }
 
 function applyCombatDamage(state, attacker, target, amount) {

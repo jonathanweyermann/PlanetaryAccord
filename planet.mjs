@@ -12,10 +12,10 @@ const smoothstep = (value) => value * value * (3 - 2 * value);
 const BIOME_BLEND_DISTANCE = 8;
 const factionProfiles = [
   { id: 'player', name: 'Landing Colony', controller: 'human' },
-  { id: 'meridian', name: 'Meridian Colony', personality: 'balanced' },
-  { id: 'aurora', name: 'Aurora Compact', personality: 'commercial' },
-  { id: 'forge', name: 'Forge Directorate', personality: 'defensive' },
-  { id: 'drift', name: 'Drift Consortium', personality: 'expansionist' },
+  { id: 'meridian', name: 'Meridian Colony', personalities: ['balanced', 'balanced', 'opportunistic'] },
+  { id: 'aurora', name: 'Aurora Compact', personalities: ['commercial', 'commercial', 'balanced'] },
+  { id: 'forge', name: 'Forge Directorate', personalities: ['defensive', 'militaristic'] },
+  { id: 'drift', name: 'Drift Consortium', personalities: ['expansionist', 'opportunistic', 'militaristic'] },
 ];
 
 export function randomFrom(seed) {
@@ -166,13 +166,19 @@ function makeSectors(random) {
   return sectors;
 }
 
-function defaultFactions(sectors, random) {
+function defaultFactions(sectors, random, seed) {
   const shuffled = [...sectors];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  return factionProfiles.map((faction, index) => ({ ...faction, home: shuffled[index].home, sector: shuffled[index].id }));
+  // Temperaments come from a separate stream so they vary per world without changing its terrain.
+  const temperament = randomFrom(hash(seed, 0x5bd1e995, 0x2f6b) * 4294967296);
+  for (let i = 0; i < 4; i++) temperament();
+  return factionProfiles.map(({ personalities, ...faction }, index) => ({
+    ...faction, ...(personalities && { personality: pick(personalities, temperament) }),
+    home: shuffled[index].home, sector: shuffled[index].id,
+  }));
 }
 
 function generateRidges(sectors, safeSites, random) {
@@ -264,7 +270,7 @@ function spineRelief(spine, x, z, roughness) {
 export function createPlanet(seed, biomeTypes, customFactions) {
   const random = randomFrom(seed);
   const sectors = makeSectors(random);
-  const startingFactions = customFactions ?? defaultFactions(sectors, random);
+  const startingFactions = customFactions ?? defaultFactions(sectors, random, seed);
   const settlementHomes = startingFactions.map(({ home }) => home);
   const landingSites = customFactions ? [...sectors.map((sector) => sector.home), ...settlementHomes] : sectors.map((sector) => sector.home);
   const localSector = startingFactions.find(({ controller }) => controller === 'human')?.sector;

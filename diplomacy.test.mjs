@@ -11,7 +11,7 @@ function setup(controllers = ['human', 'human', 'ai'], diplomacy = {}, personali
     resources: { metal: 450, biomass: 100, food: 180, energy: 150 },
   }));
   const territories = sites.map(([faction, , minX, maxX]) => ({ faction, minX, maxX, minZ: -30, maxZ: 30 }));
-  const game = createGame(14, { factions, territories, diplomacy, gatherables: [] });
+  const game = createGame(14, { factions, territories, diplomacy: { settlementGrace: 0, ...diplomacy }, gatherables: [] });
   game.hostiles.length = 0;
   for (const faction of game.factions.values()) faction.nextDecision = Infinity;
   return {
@@ -366,4 +366,42 @@ test('trading partners grow less hostile without becoming permanently untouchabl
   const after = intrusionScore(rules, b.country, c.country);
   assert(Number.isFinite(after));
   assert(after < before);
+});
+
+test('a large idle army makes aggressive factions restless but barely moves peaceful ones', () => {
+  const { rules, a, b, c } = setup(['ai', 'ai', 'ai'], {}, ['militaristic', 'commercial', 'commercial']);
+  const hawkBefore = intrusionScore(rules, a.country, b.country);
+  const doveBefore = intrusionScore(rules, b.country, a.country);
+  for (let i = 0; i < 40; i++) { addUnit(a, 'infantry', -5 - (i % 4), (i >> 2) - 5); addUnit(b, 'infantry', 25 + (i % 4), (i >> 2) - 5); }
+  const hawkGain = intrusionScore(rules, a.country, b.country) - hawkBefore;
+  const doveGain = intrusionScore(rules, b.country, a.country) - doveBefore;
+  assert(hawkGain > doveGain * 3);
+  assert(hawkGain > 4);
+  assert(Number.isFinite(intrusionScore(rules, c.country, a.country)));
+});
+
+test('wars between other factions reach factions that know either side as news', () => {
+  const { rules, a, b, c } = setup();
+  c.knownFactions.add(a.country);
+  rules.beginIncident(a.country, b.country, 'declaration');
+  rules.proceedToWar(a.country, b.country);
+  assert(c.messages.some(({ message }) => message === `News: ${a.name} went to war with ${b.name}.`));
+  assert(!a.messages.some(({ message }) => message.startsWith('News:')));
+});
+
+test('repeated deliberate withdrawals discourage further probing', () => {
+  const { rules, a, b } = setup(['ai', 'ai', 'ai'], { incidentCooldown: 0 }, ['militaristic', 'commercial']);
+  const before = intrusionScore(rules, a.country, b.country);
+  rules.beginIncident(a.country, b.country, 'declaration');
+  rules.withdraw(a.country, b.country);
+  assert.equal(rules.between(a.country, b.country).views.get(a.country).withdrawals, 1);
+  assert(intrusionScore(rules, a.country, b.country) < before);
+});
+
+test('no faction deliberately probes a rival during the settlement grace period', () => {
+  const { rules, a, b } = setup(['ai', 'ai', 'ai'], { settlementGrace: 480 }, ['militaristic', 'commercial']);
+  for (let i = 0; i < 6; i++) addUnit(a, 'vanguard', 9, i);
+  assert.equal(intrusionScore(rules, a.country, b.country), -Infinity);
+  rules.advance(480);
+  assert(intrusionScore(rules, a.country, b.country) >= 37);
 });

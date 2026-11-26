@@ -32,6 +32,8 @@ export function intrusionScore(diplomacy, attacker, defender) {
   const faction = diplomacy.factions.get(attacker);
   const opponent = diplomacy.factions.get(defender);
   const pair = diplomacy.between(attacker, defender);
+  // New colonies get a settling-in period before rivals deliberately probe their borders.
+  if (diplomacy.time < diplomacy.config.settlementGrace) return -Infinity;
   if (!pair || pair.incident || pair.treaty || pair.state === STANCE.WAR || pair.state === STANCE.DEFEATED || pair.cooldownUntil > diplomacy.time
     || pair.factions.some((id) => diplomacy.warCount(id) >= diplomacy.config.maxWars)) return -Infinity;
   const p = faction.personality;
@@ -41,10 +43,12 @@ export function intrusionScore(diplomacy, attacker, defender) {
   const conquest = faction.conquestTarget === defender ? 20 : 0;
   if (history.agreements && opinion >= -19 && !conquest) return -Infinity;
   const opportunity = diplomacy.rules.territorialValue(faction, opponent) * p.expansion;
-  return (p.aggression - 0.5) * 32 + (p.expansion - 0.5) * 30
+  // A large standing army that has nothing to do makes aggressive leaders restless.
+  const restless = p.aggression * bound(Math.log2((diplomacy.rules.strength(faction) + 20) / 300), 0, 2) * 12;
+  return (p.aggression - 0.5) * 32 + (p.expansion - 0.5) * 30 + restless
     + advantage(diplomacy, attacker, defender) * (9 + p.risk * 8) + conquest + economy + opportunity
     - opinion * 0.35 - p.economy * p.diplomacy * 13 - history.agreements * (7 + p.trust * 11)
-    - history.demands * 8 - Math.min(history.trades ?? 0, 5) * (2 + p.trust * 3) - diplomacy.warCount(attacker) * 25;
+    - history.demands * 8 - (history.withdrawals ?? 0) * 7 - Math.min(history.trades ?? 0, 5) * (2 + p.trust * 3) - diplomacy.warCount(attacker) * 25;
 }
 
 export function evaluatePeaceOffer(diplomacy, offer) {
@@ -142,7 +146,7 @@ function resolveAggressor(diplomacy, pair, aggressor, defender) {
   const edge = advantage(diplomacy, ours, theirs);
   const strategic = edge * 23 + p.aggression * 27 + p.expansion * 16
     + (aggressor.conquestTarget === theirs ? 28 : 0) - diplomacy.opinion(ours, theirs) * 0.25
-    - diplomacy.warCount(ours) * 28;
+    - diplomacy.warCount(ours) * 28 + (pair.views.get(ours).withdrawals ?? 0) * 11;
   if (!incident.deliberate) { diplomacy.withdraw(ours, theirs); return; }
   if (incident.aggressorActed) {
     if (strategic > 63 && (incident.demand || diplomacy.time >= incident.deadline - diplomacy.config.gracePeriod * 0.25)
@@ -259,15 +263,21 @@ export function advanceDiplomaticAI(diplomacy) {
       if (pair.incident && !diplomacy.pendingOffer(pair) && aggressor.controller === 'ai') {
         resolveAggressor(diplomacy, pair, aggressor, defender);
       }
-    } else if (pair.state === STANCE.WAR && diplomacy.time >= (pair.lastOverture ?? pair.warSince ?? 0) + 120) {
+    } else if (pair.state === STANCE.WAR) {
+      // A faction whose command centre is badly damaged sues for peace sooner and pays more.
+      const collapsing = (id) => (diplomacy.rules.commandIntegrity?.(id) ?? 1) < 0.6;
+      const desperate = pair.factions.some((id) => diplomacy.factions.get(id).controller === 'ai' && collapsing(id));
+      if (diplomacy.time < (pair.lastOverture ?? pair.warSince ?? 0) + (desperate ? 25 : 120)) continue;
       pair.lastOverture = diplomacy.time;
       for (const id of pair.factions) {
         const faction = diplomacy.factions.get(id);
         const other = diplomacy.factions.get(pair.factions.find((candidate) => candidate !== id));
         if (faction.controller !== 'ai') continue;
+        const urgent = collapsing(id);
         const peacePressure = faction.personality.diplomacy * 30 - advantage(diplomacy, id, other.country) * 15
-          + (diplomacy.warCount(id) - 1) * 15;
-        if (peacePressure > 22 && propose(diplomacy, faction, other, proportionalPayment(faction, other, 0.15, 75))) break;
+          + (diplomacy.warCount(id) - 1) * 15 + (urgent ? 30 : 0);
+        const tribute = urgent ? proportionalPayment(faction, other, 0.4, 180) : proportionalPayment(faction, other, 0.15, 75);
+        if (peacePressure > 22 && propose(diplomacy, faction, other, tribute)) break;
       }
     }
   }

@@ -6,7 +6,7 @@ export const STANCE = Object.freeze({
 
 export const DIPLOMACY_DEFAULTS = Object.freeze({
   gracePeriod: 30, ceasefireDuration: 600, minCeasefire: 60, maxCeasefire: 1800,
-  incidentCooldown: 90, maxWars: 2, tradeOfferLifetime: 60,
+  incidentCooldown: 90, maxWars: 2, tradeOfferLifetime: 60, settlementGrace: 480,
   modifiers: Object.freeze({
     mutuallyBeneficialTrade: 3, generousTrade: 10, peace: 5, honouredCeasefire: 5,
     incursion: -10, militaryLoss: -5, buildingLoss: -15, declaration: -20, treatyViolation: -40,
@@ -40,7 +40,7 @@ export class Diplomacy {
           factions: [id, other], state: STANCE.NEUTRAL, incident: null, treaty: null,
           lastOffer: null, cooldownUntil: 0,
           views: new Map([id, other].map((faction) => [faction, {
-            score: 0, incursions: 0, agreements: 0, trades: 0, rejectedOffers: 0, treatyViolations: 0, demands: 0,
+            score: 0, incursions: 0, agreements: 0, trades: 0, withdrawals: 0, rejectedOffers: 0, treatyViolations: 0, demands: 0,
           }])),
         };
         this.pairs.set(this.pairKey(id, other), pair);
@@ -78,6 +78,15 @@ export class Diplomacy {
 
   announce(pair, message) {
     for (const id of pair.factions) this.rules.log(this.factions.get(id), message);
+  }
+
+  // Major events between other factions reach anyone who has met either side.
+  broadcast(pair, message) {
+    this.announce(pair, message);
+    for (const [id, faction] of this.factions) {
+      if (pair.factions.includes(id) || !pair.factions.some((member) => faction.knownFactions?.has(member))) continue;
+      this.rules.log(faction, `News: ${message}`);
+    }
   }
 
   name(id) { return this.factions.get(id).name; }
@@ -122,7 +131,7 @@ export class Diplomacy {
     pair.warSince = this.time;
     pair.lastOverture = null;
     this.closeIncident(pair);
-    this.announce(pair, `${this.name(actor)} went to war with ${this.name(other)}.`);
+    this.broadcast(pair, `${this.name(actor)} went to war with ${this.name(other)}.`);
     return null;
   }
 
@@ -147,7 +156,8 @@ export class Diplomacy {
   }
 
   resolveWithdrawal(pair, message) {
-    const { aggressor, defender } = pair.incident;
+    const { aggressor, defender, deliberate } = pair.incident;
+    if (deliberate) pair.views.get(aggressor).withdrawals++;
     this.closeIncident(pair);
     pair.state = this.peacefulState(pair);
     pair.cooldownUntil = this.time + this.config.incidentCooldown;
@@ -271,7 +281,7 @@ export class Diplomacy {
       return null;
     }
     this.setCeasefire(pair, offer.duration);
-    this.announce(pair, `${this.name(actor)} and ${this.name(other)} agreed to a ceasefire.`);
+    this.broadcast(pair, `${this.name(actor)} and ${this.name(other)} agreed to a ceasefire.`);
     return null;
   }
 
