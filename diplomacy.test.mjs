@@ -307,7 +307,8 @@ test('peaceful factions can trade without a ceasefire and goodwill accumulates',
   assert.equal(b.resources.food, 140);
   assert.equal(pair.state, STANCE.NEUTRAL);
   assert.equal(pair.treaty, null);
-  assert.equal(pair.views.get(a.country).agreements, 1);
+  assert.equal(pair.views.get(a.country).trades, 1);
+  assert.equal(pair.views.get(a.country).agreements, 0);
   assert.equal(rules.opinion(b.country, a.country), 3);
 });
 
@@ -352,6 +353,17 @@ test('AI factions in contact trade on their own over time', () => {
   c.resources.food = 400;
   ticks(game, 200);
   const pair = rules.between(b.country, c.country);
-  assert(pair.views.get(b.country).agreements >= 1);
+  assert(pair.views.get(b.country).trades >= 1);
   assert(rules.opinion(c.country, b.country) > 0);
+});
+
+test('trading partners grow less hostile without becoming permanently untouchable', () => {
+  const { rules, b, c } = setup(['human', 'ai', 'ai'], {}, [undefined, 'militaristic', 'commercial']);
+  rules.rules.contact(b.country, c.country);
+  const before = intrusionScore(rules, b.country, c.country);
+  const pair = rules.between(b.country, c.country);
+  pair.views.get(b.country).trades = 3;
+  const after = intrusionScore(rules, b.country, c.country);
+  assert(Number.isFinite(after));
+  assert(after < before);
 });

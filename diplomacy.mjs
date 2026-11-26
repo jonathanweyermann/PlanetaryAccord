@@ -40,7 +40,7 @@ export class Diplomacy {
           factions: [id, other], state: STANCE.NEUTRAL, incident: null, treaty: null,
           lastOffer: null, cooldownUntil: 0,
           views: new Map([id, other].map((faction) => [faction, {
-            score: 0, incursions: 0, agreements: 0, rejectedOffers: 0, treatyViolations: 0, demands: 0,
+            score: 0, incursions: 0, agreements: 0, trades: 0, rejectedOffers: 0, treatyViolations: 0, demands: 0,
           }])),
         };
         this.pairs.set(this.pairKey(id, other), pair);
@@ -257,7 +257,8 @@ export class Diplomacy {
     if (!trade) this.closeIncident(pair);
     for (const id of pair.factions) {
       if (!trade) this.changeOpinion(pair, id, 'peace');
-      pair.views.get(id).agreements++;
+      // Trades build goodwill but are not peace treaties, so they are counted separately.
+      pair.views.get(id)[trade ? 'trades' : 'agreements']++;
     }
     if (giving > 0 && taking > 0 && Math.max(giving, taking) <= Math.min(giving, taking) * 1.5) {
       for (const id of pair.factions) this.changeOpinion(pair, id, 'mutuallyBeneficialTrade');

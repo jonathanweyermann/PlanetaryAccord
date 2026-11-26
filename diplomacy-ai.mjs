@@ -44,7 +44,7 @@ export function intrusionScore(diplomacy, attacker, defender) {
   return (p.aggression - 0.5) * 32 + (p.expansion - 0.5) * 30
     + advantage(diplomacy, attacker, defender) * (9 + p.risk * 8) + conquest + economy + opportunity
     - opinion * 0.35 - p.economy * p.diplomacy * 13 - history.agreements * (7 + p.trust * 11)
-    - history.demands * 8 - diplomacy.warCount(attacker) * 25;
+    - history.demands * 8 - Math.min(history.trades ?? 0, 5) * (2 + p.trust * 3) - diplomacy.warCount(attacker) * 25;
 }
 
 export function evaluatePeaceOffer(diplomacy, offer) {
