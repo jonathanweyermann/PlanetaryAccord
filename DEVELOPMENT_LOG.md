@@ -63,3 +63,31 @@ The game was played in the browser pane at `http://localhost:8000/?seed=22204131
 - **AI aggression is very low.** No AI faction comes near the intrusion threshold of 37 in 40 minutes; the most aggressive pairing, Drift → Meridian, peaks at about +15. This was true before the trade work. AI wars are effectively absent, so the "potential warfare" half of the faction simulation needs tuning, ideally with playtesting over long games.
 - Number keys 1–6 start building placement.
 - AI → player trade proposals only show up as a badge on the Diplomacy button; a toast might make them easier to notice.
+
+## 2026-11-26 — Iteration 4: AI faction aggression
+
+### Diagnosis (headless 40-minute runs; the score is intrusionScore, where 37 triggers an incursion)
+- **The AI cast never changed.** Personalities were fixed per faction, so every seed had balanced, commercial, defensive and expansionist rivals, and militaristic and opportunistic never appeared. That hurt both replayability and conflict.
+- **The land motive was dead.** territorialValue only counted rival deposits within about 70 units of the faction's own home; colonies are 120+ apart, so it was always 0.
+- **Army size didn't matter.** Only the strength *ratio* mattered, so Drift growing from 340 to 1,542 strength barely changed its intent.
+
+### Changes
+- Personalities are drawn per seed from thematic pools. A separate random stream keeps terrain identical, which I checked: same homes and same maps for the known seeds. Across 60 seeds the distribution matched the intended weights.
+- Rival deposits are valued relative to the distance between colonies.
+- A large standing army makes aggressive leaders "restless".
+- Repeated deliberate withdrawals deter further probing but harden resolve, so a determined aggressor eventually escalates.
+- A collapsing faction (command centre below 60%) sues for peace every 25s instead of every 120s, with a larger tribute.
+- Settlement grace: no deliberate incursions in the first 8 minutes. In a browser playtest *before* this change, Drift probed my colony at 3:07, while I was still on tutorial step 1.
+- Wars, ceasefires and defeats between other factions now reach anyone who knows either side, as "News:" lines in the field log.
+
+### Evidence
+- **Seed 2220413130:** 3 incidents at 11, 17 and 25 min, each resolved by a compensated ceasefire, plus 20 trades. Third parties received the News lines.
+- **Seed 3921109754:** militaristic Forge probes Drift at 21 min, withdraws, probes again at 23 min, and goes to war. Before the withdrawal rule, it probed and withdrew 11 times in a row.
+- **Seed 12345:** a peaceful mix, with no incidents.
+- 64/64 tests pass. In the browser, the game loads with no console errors after the changes.
+- I didn't see a News line in the browser. The browser run happened before the broadcast existed, and the pane was hidden (a throttled background tab: only 5:22 of game time in about 3 real minutes at 4×). News is covered by a unit test and the headless runs.
+
+### Remaining weaknesses
+- **Wars are decisive and abrupt.** On seed 3921109754, Drift's command centre went from healthy to destroyed in about 1 second, and the faction was eliminated 53s after war was declared. Peace bids come too late. Defence, command-centre durability and attack pacing need a closer look with a visible browser pane.
+- Effective game speed in a hidden browser pane is far below the selected speed. Performance in a visible pane is unmeasured.
+- Number keys 1–6 start building placement.
