@@ -183,8 +183,8 @@ function initControls() {
     updateMinimap();
     renderNeighbor();
   });
-  $('zoom-in').addEventListener('click', () => view.setZoom(view.zoom * 1.19));
-  $('zoom-out').addEventListener('click', () => view.setZoom(view.zoom / 1.19));
+  $('zoom-in').addEventListener('click', () => view.setZoom(view.zoom * 1.19 ** 3));
+  $('zoom-out').addEventListener('click', () => view.setZoom(view.zoom / 1.19 ** 3));
   $('settings').addEventListener('click', () => {
     $('new-seed').value = game.world.seed;
     showGameDialog('world-dialog');
@@ -1350,7 +1350,7 @@ function setMapEvents() {
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
     if (!event.deltaY) return;
-    view.setZoom(view.zoom * (event.deltaY < 0 ? 1.13 : 1 / 1.13), event);
+    view.setZoom(view.zoom * (event.deltaY < 0 ? 1.13 ** 3 : 1 / 1.13 ** 3), event);
   }, { passive: false });
   minimap.addEventListener('click', (event) => {
     const point = minimapPoint(event);
