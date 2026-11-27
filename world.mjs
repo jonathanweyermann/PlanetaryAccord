@@ -177,6 +177,9 @@ export function createGame(seed, options = {}) {
     }
   }
   const hostiles = world.wildlife;
+  for (const hive of hostiles.filter(({ kind }) => kind === 'hive')) {
+    world.navigation.addStructure(hive, { a: hive, b: hive, kind: 'hive', radius: HIVE_RADIUS, entity: hive });
+  }
   const factions = new Map(definitions.map((definition) => [definition.id, createColony(world, definition)]));
   for (const colony of factions.values()) {
     Object.assign(colony, { factions, hostiles });
@@ -579,6 +582,9 @@ export function buildingSite(state, type, point) {
   const { navigation } = state.world;
   if (navigation.intersects(shape.a, shape.b, shape.radius, (other) => other.kind === 'ridge')) {
     return { ...site, error: 'Uncrossable ridge. Look for a pass.' };
+  }
+  if (navigation.intersects(shape.a, shape.b, shape.radius + BUILDING_LANE, (other) => other.kind === 'hive')) {
+    return { ...site, error: 'An alien hive occupies this ground. Destroy it first.' };
   }
   if (navigation.intersects(shape.a, shape.b, shape.radius, (other) => other.kind === 'tree')) {
     // A Biomass Yard sits in a grove, so its crew clears the trees as part of the same order.
@@ -1486,7 +1492,7 @@ export const STRUCTURE_SMALL_ARMS_FACTOR = 0.35;
 
 function applyCombatDamage(state, attacker, target, amount) {
   // Structures are armoured: small arms barely scratch them, while shell-firing siege units hit in full.
-  const structure = target.progress !== undefined;
+  const structure = target.progress !== undefined || target.kind === 'hive';
   const smallArms = !(UNITS[attacker.type] ?? BUILDINGS[attacker.type])?.combat?.shell;
   target.health -= structure && smallArms ? amount * STRUCTURE_SMALL_ARMS_FACTOR : amount;
   const victim = state.factions.get(target.factionId);
@@ -1499,6 +1505,10 @@ function applyCombatDamage(state, attacker, target, amount) {
 function reportCombatLoss(state, target) {
   target.health = 0;
   if (!target.factionId) {
+    if (target.kind === 'hive') {
+      destroyHive(state, target);
+      return;
+    }
     leaveUnitRemains(state, target);
     log(state, 'Hostile reptile defeated.');
     return;
@@ -1553,9 +1563,15 @@ function progressWildlife(state, dt) {
   const { world } = state;
   const targets = [...state.factions.values()].filter((colony) => !colony.defeat)
     .flatMap((colony) => [...colony.units, ...colony.buildings.filter((building) => building.type !== 'command' && building.type !== 'wall')]);
-  for (const enemy of state.hostiles) {
+  // Hive spawns leave remains when they die; drop the dead ones so the list does not grow all game.
+  for (let index = state.hostiles.length - 1; index >= 0; index--) {
+    if (state.hostiles[index].hiveId && state.hostiles[index].health <= 0) state.hostiles.splice(index, 1);
+  }
+  for (const enemy of [...state.hostiles]) {
     if (enemy.health <= 0) continue;
+    if (enemy.kind === 'hive') { advanceHive(state, enemy); continue; }
     enemy.cooldown -= dt;
+    if (enemy.raid) { advanceRaider(state, enemy, dt); continue; }
     const allowed = (point) => distance(enemy.den, point) <= enemy.leash
       && world.settlementHomes.every((home) => distance(home, point) >= LANDING_CLEARANCE);
     const target = targets.find((item) => item.health > 0 && distance(item, enemy) < 9 && allowed(item)
@@ -1578,6 +1594,128 @@ function progressWildlife(state, dt) {
       }
     }
   }
+}
+
+// --- Alien hives -----------------------------------------------------------------------------
+// One tuning block for the neutral aliens. Times are game seconds.
+export const ALIENS = Object.freeze({
+  scoutAt: 300,            // a lone scout looks over the colony at 5 minutes
+  firstRaidAt: 420,        // the first raid leaves the brood hive at 7 minutes
+  raidInterval: 180,       // then one raid every 3 minutes
+  firstRaidSize: 2,        // 2, 2, 3, 3, 4, 5, 5, 6 ... creatures
+  raidGrowth: 0.6,         // extra creatures per raid
+  maxRaidSize: 10,
+  ancientsFromRaid: 3,     // heavier ancients join from the third raid (one per three creatures)
+  guards: Object.freeze({ brood: 4, nest: 3 }),
+  guardRespawn: 70,
+  guardLeash: 16,
+});
+const HIVE_RADIUS = 2.1;
+const CREATURES = {
+  reptile: { health: 155, speed: 3.4, damage: 15 },
+  ancient: { health: 245, speed: 2.45, damage: 24 },
+};
+const COMPASS = ['east', 'north-east', 'north', 'north-west', 'west', 'south-west', 'south', 'south-east'];
+const compass = (from, to) => {
+  const angle = Math.atan2(-(to.z - from.z), to.x - from.x);
+  return COMPASS[((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8];
+};
+
+function spawnCreature(state, hive, kind, extra = {}) {
+  const angle = hive.heading + hive.spawned * 2.39996;
+  const x = hive.x + Math.cos(angle) * (HIVE_RADIUS + 1.2);
+  const z = hive.z + Math.sin(angle) * (HIVE_RADIUS + 1.2);
+  const stats = CREATURES[kind];
+  const creature = { id: `${hive.id}-${hive.spawned++}`, kind, hiveId: hive.id, x, z, den: { x: hive.x, z: hive.z },
+    phase: angle, heading: angle, health: stats.health, maxHealth: stats.health, speed: stats.speed, damage: stats.damage,
+    cooldown: 0, leash: ALIENS.guardLeash, ...extra };
+  state.hostiles.push(creature);
+  return creature;
+}
+
+function advanceHive(state, hive) {
+  const { time } = state;
+  const guards = state.hostiles.filter((creature) => creature.hiveId === hive.id && creature.health > 0 && !creature.raid);
+  hive.nextGuard ??= time;
+  if (guards.length < ALIENS.guards[hive.role] && time >= hive.nextGuard) {
+    spawnCreature(state, hive, hive.spawned % 3 === 2 ? 'ancient' : 'reptile');
+    hive.nextGuard = time + ALIENS.guardRespawn;
+  }
+  const colony = hive.target && state.factions.get(hive.target);
+  if (!colony || colony.defeat) return;
+  if (!hive.scouted && time >= ALIENS.scoutAt) {
+    hive.scouted = true;
+    spawnCreature(state, hive, 'reptile', { raid: 'scout', raidTarget: colony.country, speed: 4.6, damage: 0 });
+  }
+  hive.nextRaid ??= ALIENS.firstRaidAt;
+  if (time < hive.nextRaid) return;
+  hive.nextRaid += ALIENS.raidInterval;
+  const size = Math.min(ALIENS.maxRaidSize, ALIENS.firstRaidSize + Math.floor(hive.wave * ALIENS.raidGrowth));
+  const ancients = hive.wave + 1 >= ALIENS.ancientsFromRaid ? Math.floor(size / 3) : 0;
+  hive.wave++;
+  for (let index = 0; index < size; index++) {
+    spawnCreature(state, hive, index < ancients ? 'ancient' : 'reptile', { raid: 'assault', raidTarget: colony.country });
+  }
+  log(colony, `Alien raid ${hive.wave}: ${size} creatures are moving on the colony from the ${compass(colony.home, hive)}.`);
+}
+
+function raidTargets(colony) {
+  return [...colony.units, ...colony.buildings.filter((building) => building.type !== 'wall')]
+    .filter((item) => item.health > 0 && (item.progress === undefined || item.progress > 0));
+}
+
+function advanceRaider(state, enemy, dt) {
+  const { world } = state;
+  const colony = state.factions.get(enemy.raidTarget);
+  const clearance = enemy.kind === 'ancient' ? 0.9 : 0.66;
+  if (!colony || colony.defeat) {
+    // With nothing left to raid, survivors settle where they stand as guards.
+    enemy.raid = null;
+    enemy.den = { x: enemy.x, z: enemy.z };
+    return;
+  }
+  if (enemy.raid === 'scout') {
+    if (!enemy.lingerUntil) {
+      const back = Math.atan2(enemy.z - colony.home.z, enemy.x - colony.home.x);
+      const lookout = { x: colony.home.x + Math.cos(back) * 15, z: colony.home.z + Math.sin(back) * 15 };
+      if (travelEntity(world, enemy, lookout, dt, state.time, enemy.speed, clearance, 1.5, null, null)) {
+        enemy.lingerUntil = state.time + 8;
+        log(colony, `An alien scout is watching the colony from the ${compass(colony.home, enemy)}. Raids will follow.`);
+      }
+    } else if (state.time >= enemy.lingerUntil
+      && travelEntity(world, enemy, enemy.den, dt, state.time, enemy.speed, clearance, 3, null, null)) {
+      enemy.raid = null;
+    }
+    return;
+  }
+  const targets = raidTargets(colony);
+  let prey = enemy.prey?.health > 0 && distance(enemy.prey, enemy) < 16 ? enemy.prey : null;
+  prey ??= targets.filter((item) => distance(item, enemy) < 12 && world.navigation.clearShot(enemy, item))
+    .sort((a, b) => distance(a, enemy) - distance(b, enemy))[0];
+  // March on the nearest structure; engage anything that comes within reach on the way.
+  prey ??= targets.filter((item) => item.progress !== undefined).sort((a, b) => distance(a, enemy) - distance(b, enemy))[0];
+  enemy.prey = prey;
+  if (!prey) return;
+  const range = prey.progress !== undefined ? buildingFootprint(prey).radius + clearance + 0.3 : 1.75;
+  const reached = travelEntity(world, enemy, prey, dt, state.time, enemy.speed, clearance, range, null,
+    (point) => world.navigation.clearShot(point, prey));
+  if (!reached || enemy.cooldown > 0) return;
+  applyCombatDamage(state, enemy, prey, enemy.damage);
+  enemy.heading = Math.atan2(prey.x - enemy.x, prey.z - enemy.z);
+  enemy.cooldown = 1.45;
+  if (prey.health <= 0) {
+    prey.health = 0;
+    log(colony, prey.progress === undefined ? `${UNITS[prey.type].name} killed by alien raiders.`
+      : `${BUILDINGS[prey.type].name} disabled by alien raiders. Send a rover to repair it.`);
+  }
+}
+
+function destroyHive(state, hive) {
+  hive.health = 0;
+  state.world.navigation.removeStructure(hive);
+  log(state, hive.role === 'brood' ? 'Brood hive destroyed. The alien raids have stopped.' : 'Alien nest destroyed.');
+  const victim = hive.target && state.factions.get(hive.target);
+  if (victim && victim !== state) log(victim, 'The brood hive has been destroyed. The alien raids have stopped.');
 }
 
 export const FAMINE_DEPARTURE_INTERVAL = 30;

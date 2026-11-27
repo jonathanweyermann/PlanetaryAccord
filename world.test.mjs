@@ -4,7 +4,7 @@ import { Navigation, pointSegmentDistance } from './navigation.mjs';
 import { LANDING_CLEARANCE, SECTOR_SIZE } from './planet.mjs';
 import { attackBorderPoint, attackBorderWeight } from './territory.mjs';
 import {
-  BIOMES, BUILDINGS, BUILDING_LANE, MAP_DEPTH, MAP_MIN_X, MAP_MIN_Z, MAP_WIDTH, UNITS, UNIT_REMAINS_LIFETIME, WALL_LENGTH, addUnit, aimedWallSite, assistConstruction, availableConstructionDeposits, buildingFootprint, buildingSite, createFog, createGame, distance,
+  ALIENS, BIOMES, BUILDINGS, BUILDING_LANE, MAP_DEPTH, MAP_MIN_X, MAP_MIN_Z, MAP_WIDTH, UNITS, UNIT_REMAINS_LIFETIME, WALL_LENGTH, addUnit, aimedWallSite, assistConstruction, availableConstructionDeposits, buildingFootprint, buildingSite, createFog, createGame, distance,
   isBlueprint, maxBuildingHealth, orderBuilding, orderFactionAttack, orderHarvestPatrol, orderRoverAssist, productionDetails, queueTraining, removeBuilding, setConverterRecipe, setRallyPoint, setUnitOrder,
   territoryOwner, unitClearance, unitHitRadius, updateFog, updateGame, wallStrokeSites,
 } from './world.mjs';
@@ -1031,4 +1031,34 @@ test('ordering a biomass yard over trees clears them and builds it in one order'
   assert(game.resources.biomass > biomass);
   assert.equal(yard.progress, 1);
   assert.equal(yard.deposit, grove);
+});
+
+test('a brood hive leaves the landing zone alone, scouts at five minutes, then sends growing raids until destroyed', () => {
+  const game = createGame(2220413130);
+  const hives = game.hostiles.filter(({ kind }) => kind === 'hive');
+  const brood = hives.find(({ role }) => role === 'brood');
+  assert.equal(brood.target, game.country);
+  assert(hives.filter(({ role }) => role === 'nest').every((nest) => !nest.target));
+  for (const hive of hives) assert(game.world.settlementHomes.every((home) => distance(home, hive) > 60));
+  const raiders = () => game.hostiles.filter((creature) => creature.raid && creature.health > 0);
+  tick(game, ALIENS.scoutAt - 1);
+  assert.equal(raiders().length, 0);
+  tick(game, 2);
+  assert.deepEqual(raiders().map(({ raid }) => raid), ['scout']);
+  tick(game, ALIENS.firstRaidAt - game.time + 0.5);
+  assert.equal(raiders().filter(({ raid }) => raid === 'assault').length, ALIENS.firstRaidSize);
+  assert(game.messages.some(({ message }) => /Alien raid 1: 2 creatures/.test(message)));
+  for (const creature of raiders()) creature.health = 0;
+  brood.health = 1;
+  const soldier = addUnit(game, 'siege', brood.x + 4, brood.z);
+  setUnitOrder(soldier, { kind: 'attack', target: brood });
+  tick(game, 3);
+  assert.equal(brood.health, 0);
+  assert(game.messages.some(({ message }) => /Brood hive destroyed/.test(message)));
+  tick(game, ALIENS.raidInterval * 2);
+  assert.equal(raiders().filter(({ raid }) => raid === 'assault').length, 0);
+});
+
+test('custom test worlds have no hives', () => {
+  assert(fixture().hostiles.every(({ kind }) => kind !== 'hive'));
 });

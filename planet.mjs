@@ -228,6 +228,31 @@ function generateWildlife(sectors, settlementHomes, ridges, random) {
   return creatures;
 }
 
+// Alien hives occupy the sectors no faction settled. The one nearest the human colony is a brood
+// hive that raids it; the rest are passive nests whose guards only fight when disturbed.
+function generateHives(sectors, factions, ridges, random) {
+  const settled = new Set(factions.map(({ sector }) => sector));
+  const human = factions.find(({ controller }) => controller === 'human') ?? factions[0];
+  const free = sectors.filter(({ id }) => !settled.has(id))
+    .sort((a, b) => distance(a.home, human.home) - distance(b.home, human.home));
+  const hives = [];
+  for (const [index, sector] of free.entries()) {
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const angle = random() * Math.PI * 2;
+      const reach = attempt ? 4 + random() * 14 : 0;
+      const site = { x: sector.home.x + Math.cos(angle) * reach, z: sector.home.z + Math.sin(angle) * reach };
+      if (ridges.some((ridge) => pointSegmentDistance(site, ridge.a, ridge.b) < ridge.radius + 4)) continue;
+      const brood = index === 0;
+      const maxHealth = brood ? 1400 : 900;
+      hives.push({ id: `hive-${sector.id}`, kind: 'hive', role: brood ? 'brood' : 'nest', ...site, den: site,
+        target: brood ? human.id : null, health: maxHealth, maxHealth, heading: random() * Math.PI * 2,
+        phase: 0, cooldown: 0, leash: 0, spawned: 0, wave: 0 });
+      break;
+    }
+  }
+  return hives;
+}
+
 function mountainRange(center, random) {
   const angle = random() * Math.PI * 2;
   const spine = (x, z, heading, span, width, height) => ({
@@ -294,6 +319,7 @@ export function createPlanet(seed, biomeTypes, customFactions) {
   ];
   const ridges = generateRidges(sectors, safeSites, randomFrom(seed + 2399));
   const wildlife = generateWildlife(sectors, landingSites, ridges, randomFrom(seed + 632));
+  if (!customFactions) wildlife.push(...generateHives(sectors, startingFactions, ridges, randomFrom(seed + 911)));
   const ridgeBands = ridges.map((ridge) => {
     const margin = ridge.radius + 3.5;
     const length = distance(ridge.a, ridge.b);

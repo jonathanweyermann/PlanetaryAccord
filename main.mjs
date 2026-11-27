@@ -1057,7 +1057,9 @@ function issueTerrainOrder(units, point, { clientX, clientY }, append) {
   const natural = rovers.length ? gatherableUnder(point, clientX, clientY) : null;
   const deposit = building?.deposit && 'surface' in building.deposit ? building.deposit
     : natural ?? nearest(game.world.deposits.filter((item) => 'surface' in item), point, DEPOSIT_PICK_RADIUS);
-  const enemy = nearest(game.hostiles.filter((item) => item.health > 0 && inSight(item, sight)), point, 1.4);
+  const visibleHostiles = game.hostiles.filter((item) => item.health > 0 && inSight(item, sight));
+  const enemy = nearest(visibleHostiles.filter((item) => item.kind !== 'hive'), point, 1.4)
+    ?? nearest(visibleHostiles.filter((item) => item.kind === 'hive'), point, 3.2);
   const relays = game.world.outposts.filter((site) => site.relay && site.discovered && !site.owner);
   const relay = entityUnder(clientX, clientY, relays) || nearest(relays, point, 2.4);
   if (relay && rovers.length) {
@@ -1515,6 +1517,12 @@ function updateMinimap(sight = sightSources(game), alert = currentAttackAlert())
   mini.fillStyle = '#e59a78';
   for (const reptile of game.hostiles) {
     if (!reptile.health || !inSight(reptile, sight)) continue;
+    if (reptile.kind === 'hive') {
+      mini.fillStyle = '#d06bff';
+      mini.fillRect(mapX(reptile.x) - 4, mapZ(reptile.z) - 4, 8, 8);
+      mini.fillStyle = '#e59a78';
+      continue;
+    }
     mini.fillRect(mapX(reptile.x) - 2, mapZ(reptile.z) - 2, 4, 4);
   }
   if (extractor) {

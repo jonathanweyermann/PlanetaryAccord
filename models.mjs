@@ -624,6 +624,31 @@ function addRunningGear(group, type) {
   }
 }
 
+// A primitive alien settlement: a fleshy mound ringed by bone spires with glowing tips and egg pods.
+function modelHive() {
+  const group = new THREE.Group();
+  const shell = '#4a3346';
+  const flesh = '#6d4560';
+  primitive(group, 'sphere', shell, 0, 0.45, 0, 3.6, 1.6, 3.4);
+  primitive(group, 'sphere', flesh, 0.2, 1.05, -0.1, 2.4, 1.5, 2.3);
+  primitive(group, 'sphere', '#82546f', -0.1, 1.65, 0.1, 1.3, 1.1, 1.3);
+  primitive(group, 'drum', '#1b0f1a', 0, 2.15, 0, 0.55, 0.12, 0.55);
+  for (let index = 0; index < 7; index++) {
+    const angle = index / 7 * Math.PI * 2 + 0.3;
+    const reach = 1.55 + (index % 2) * 0.25;
+    const height = 1.5 + (index % 3) * 0.45;
+    const spire = primitive(group, 'cone', '#c9bca3', Math.cos(angle) * reach, height / 2 + 0.2, Math.sin(angle) * reach, 0.32, height, 0.32);
+    spire.rotation.set(Math.sin(angle) * 0.35, 0, -Math.cos(angle) * 0.35);
+    primitive(group, 'sphere', '#d06bff', Math.cos(angle) * (reach + Math.cos(angle) * height * 0.17), height + 0.2,
+      Math.sin(angle) * (reach + Math.sin(angle) * height * 0.17), 0.2, 0.2, 0.2, true);
+  }
+  for (let index = 0; index < 5; index++) {
+    const angle = index / 5 * Math.PI * 2 + 1.1;
+    primitive(group, 'sphere', '#9fe8c2', Math.cos(angle) * 1.95, 0.32, Math.sin(angle) * 1.95, 0.55, 0.62, 0.55, true);
+  }
+  return group;
+}
+
 function makeUnitModel(type) {
   const asset = unitAssets.get(type);
   if (asset) {
@@ -649,6 +674,7 @@ function makeUnitModel(type) {
     group.scale.setScalar(UNITS[type]?.scale ?? (type === 'ancient' ? 1.64 : type === 'reptile' ? 1.3 : 1));
     return group;
   }
+  if (type === 'hive') return modelHive();
   if (type === 'reptile' || type === 'ancient') return modelReptile(type === 'ancient');
   const group = new THREE.Group();
   const { dark, shell, steel, cyan, amber, tread } = palette;
