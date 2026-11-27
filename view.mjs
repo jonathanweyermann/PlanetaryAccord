@@ -330,8 +330,7 @@ export class WorldView {
       const groundDistance = -origin.y / direction.y;
       const anchorX = origin.x + direction.x * groundDistance;
       const anchorZ = origin.z + direction.z * groundDistance;
-      // Zooming in recentres on the point under the cursor; zooming out keeps that point under the cursor.
-      const shift = zoom > this.zoom ? 1 : 1 - this.zoom / zoom;
+      const shift = 1 - this.zoom / zoom;
       this.center(this.focus.x + (anchorX - this.focus.x) * shift,
         this.focus.z + (anchorZ - this.focus.z) * shift);
     }
@@ -1114,7 +1113,7 @@ export class WorldView {
         const root = new THREE.Group();
         const visual = modelKind === 'building' ? buildingModel(entity.type) : unitModel(entity.type || entity.kind);
         const foot = contactShadow(entity.type === 'command' ? 3.1 : entity.wall ? 0.69
-          : modelKind === 'building' ? 1.58 : modelKind === 'enemy' ? 1.28 : 0.69);
+          : modelKind === 'building' ? 1.58 : entity.kind === 'hive' ? 3.4 : modelKind === 'enemy' ? 1.28 : 0.69);
         const ring = new THREE.Mesh(new THREE.RingGeometry(0.68, 0.74, 24), new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.9, depthWrite: false }));
         ring.rotation.x = -Math.PI / 2;
         ring.position.y = 0.085;
@@ -1146,7 +1145,7 @@ export class WorldView {
         model.ring.material.color.set(ringColor);
         model.ringColor = ringColor;
       }
-      model.ring.scale.setScalar(entity.type === 'command' ? 3.15 : modelKind === 'building' ? 1.65 : 1);
+      model.ring.scale.setScalar(entity.type === 'command' ? 3.15 : modelKind === 'building' ? 1.65 : entity.kind === 'hive' ? 3.2 : 1);
       if (!entity.wall) model.visual.rotation.y = entity.heading || 0;
       if (model.visual.userData.tail) model.visual.userData.tail.rotation.y = Math.sin(state.time * 3.1 + entity.phase) * 0.23;
       const turret = model.visual.userData.turret;
