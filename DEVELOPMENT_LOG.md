@@ -122,3 +122,37 @@ The game was played in the browser pane at `http://localhost:8000/?seed=22204131
 - **Peace evaluation.** Forge kept rejecting peace with only 1–4 units left, because its strength estimate counts towers and buildings, which can't project force. The attacker's offensive strength should drive that decision.
 - AI populations keep growing through endless habitats (pop 90+), and metal stockpiles reach 1,000+ unused. The AI needs better resource sinks.
 - Number keys 1–6 start building placement.
+
+## 2026-11-26 — Iteration 6: rolling wheels, dust, AI economy, war behaviour
+
+### Visuals (verified in the browser)
+- **Rolling wheels.** Wheels were baked into each Blender hull, so vehicles slid with frozen wheels. Spinning overlays now match the wheel positions in `tools/model-units.py`: treaded tyres on rovers and skirmishers, and spoked road wheels on vanguard and siege tracks. An amber lug makes the rotation readable, and wheels roll by the distance the unit actually travels. In a close-up render, a skirmisher's lug moved from top to bottom after 0.55 units of travel, and in-game the rovers' wheel travel accumulated while driving.
+- **Dust trails.** Moving vehicles leave pale dust puffs that drift up and fade over 1.4s. Two rendering pitfalls are documented in the commit: the camera is orthographic, and the puffs must draw after the translucent terrain overlays.
+
+### Input fix
+- Right-clicking the visible rocks of an Iron Deposit often landed 2.4 units from its centre, outside the 2.15 pick radius, and became a silent move order. This is why the first tutorial step looked broken. The pick radius is now 3. The same click now reports "3 rovers harvesting metal" and metal rises 65 → 124.
+
+### AI economy
+- **Before:** after 40 min, factions held 1,000–2,500 metal with endless habitats and all-infantry armies.
+- **Spending:**
+  - Habitats stop at a population target (30/40/50 by command tier).
+  - A development planner spends surplus on Tier II/III, a Combat Factory, extractors, Hydroponics, research, a Heavy Foundry and Bastions.
+  - Advanced units get their own army slots, so armies improve in quality rather than size.
+  - Colonies without a biomass grove build a Reclaimer to turn food into biomass.
+- **Deadlocks fixed:**
+  - Rovers tried to hand-harvest the deposit under an unpaid mine blueprint, leaving metal frozen at 10.
+  - Metal is now reserved for the first mine, and the AI's command centre salvages a trickle while it has no working mine.
+  - Unreachable blueprints are abandoned and remembered, and sites must be a straight drive from a rover.
+- **Result:** 40-min runs on 3 seeds. Every faction survives, and 11 of 12 reach Tier III with a factory, foundry, extractors, all research and mixed armies (sentinels, skirmishers, vanguards, siege).
+
+### War behaviour
+- Peace offers are judged on field armies, not towers at home.
+- Armies only march out with a field advantage scaled by aggression: militaristic factions attack at roughly even odds, balanced ones need about 1.2×.
+- War weariness builds pressure to negotiate on both sides.
+- **Forced war, seed 3921109754:** Forge, with vanguards and siege guns, beat Drift's all-infantry army and took its colony in about 2 min. That's a genuine tech gap rather than a broken defence, and no faction was eliminated in the unforced runs. A tuning step in between produced a 10-minute standoff with no fighting, and the war-weariness and aggression thresholds were added to resolve that.
+
+### Remaining weaknesses
+- Shell-firing units ignore building armour, so a tech lead still flattens a command centre fast. Command health should probably scale further against siege, or defenders should build towers earlier.
+- Stockpiles are lower but still large late in the game (about 1,000–2,000 metal); late-game sinks such as more units, the uplink or more trade could help.
+- Forge on seed 12345 stays at Tier II because its terrain has few straight-line build sites.
+- Number keys 1–6 start building placement.
