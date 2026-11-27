@@ -157,6 +157,8 @@ export function unitModel(type) {
   const model = modelInstance(units, makeUnitModel, type);
   if (type === 'reptile' || type === 'ancient') model.userData.tail = model.getObjectByName('tail');
   if (UNITS[type]?.combat?.shell) model.userData.turret = model.getObjectByName('turret');
+  const wheels = model.children.filter((child) => child.name === 'wheel');
+  if (wheels.length) model.userData.gear = { wheels };
   return model;
 }
 
@@ -583,6 +585,45 @@ function modelReptile(ancient) {
   return group;
 }
 
+// Wheel layouts mirror tools/model-units.py (Blender x, y, z -> game -x, z, y) so the spinning
+// overlays sit exactly over the wheels baked into each hull.
+const roadWheels = (half) => [-2, -1, 0, 1, 2].map((row) => row * (half - 0.16) / 2);
+const RUNNING_GEAR = {
+  rover: { x: 0.385, y: 0.183, radius: 0.175, width: 0.18, rows: [-0.44, -0.03, 0.39], tyre: true },
+  skirmisher: { x: 0.408, y: 0.181, radius: 0.18, width: 0.18, rows: [-0.4, 0.38], tyre: true },
+  // Tracked hulls: spin the road wheels that show through the side of each track.
+  vanguard: { x: 0.469, y: 0.225, radius: 0.118, width: 0.05, rows: roadWheels(0.55) },
+  siege: { x: 0.469, y: 0.225, radius: 0.118, width: 0.05, rows: roadWheels(0.70) },
+};
+
+function addRunningGear(group, type) {
+  const gear = RUNNING_GEAR[type];
+  if (!gear) return;
+  const { x, y, radius, width, rows, tyre } = gear;
+  for (const side of [-1, 1]) {
+    for (const z of rows) {
+      const wheel = new THREE.Group();
+      wheel.name = 'wheel';
+      wheel.position.set(side * x, y, z);
+      wheel.userData.radius = radius;
+      group.add(wheel);
+      const face = side * (width / 2 + 0.004);
+      primitive(wheel, 'drum', tyre ? '#1f272a' : '#5d6b6e', 0, 0, 0, radius * 2.06, width * 1.04, radius * 2.06).rotation.z = Math.PI / 2;
+      primitive(wheel, 'drum', '#7b8b8c', face, 0, 0, radius * 1.32, 0.022, radius * 1.32).rotation.z = Math.PI / 2;
+      // Spokes and a lug make the rotation readable from the overhead camera.
+      primitive(wheel, 'box', '#c4cfca', face + side * 0.013, 0, 0, 0.012, radius * 1.24, 0.045);
+      primitive(wheel, 'box', '#c4cfca', face + side * 0.013, 0, 0, 0.012, 0.045, radius * 1.24);
+      primitive(wheel, 'box', '#e7ad63', face + side * 0.016, radius * 0.78, 0, 0.014, radius * 0.2, radius * 0.2);
+      if (!tyre) continue;
+      for (let tread = 0; tread < 6; tread++) {
+        const angle = tread / 6 * Math.PI * 2;
+        primitive(wheel, 'box', '#3a4549', 0, Math.cos(angle) * radius * 1.03, Math.sin(angle) * radius * 1.03,
+          width * 1.06, 0.03, 0.05).rotation.x = -angle;
+      }
+    }
+  }
+}
+
 function makeUnitModel(type) {
   const asset = unitAssets.get(type);
   if (asset) {
@@ -604,6 +645,7 @@ function makeUnitModel(type) {
         group.add(mesh);
       }
     }
+    addRunningGear(group, type);
     group.scale.setScalar(UNITS[type]?.scale ?? (type === 'ancient' ? 1.64 : type === 'reptile' ? 1.3 : 1));
     return group;
   }

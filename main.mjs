@@ -1021,6 +1021,9 @@ function issueOrder(point, append, terrainEvent) {
   finishMapOrder(point, append);
 }
 
+// Deposit rocks are drawn wider than their centre point, and the tilted camera shifts ground picks behind them.
+const DEPOSIT_PICK_RADIUS = 3;
+
 function issueTerrainOrder(units, point, { clientX, clientY }, append) {
   const rovers = units.filter((unit) => unit.type === 'rover');
   const sight = sightSources(game);
@@ -1042,7 +1045,7 @@ function issueTerrainOrder(units, point, { clientX, clientY }, append) {
     // A rover standing on a deposit must not turn a harvest click into an assist order,
     // and assisting a rover that is itself part of the selection is meaningless.
     const overResource = rovers.length && (gatherableUnder(point, clientX, clientY)
-      || nearest(game.world.deposits.filter((item) => 'surface' in item && item.surface > 0), point, 2.15));
+      || nearest(game.world.deposits.filter((item) => 'surface' in item && item.surface > 0), point, DEPOSIT_PICK_RADIUS));
     if (rover && !selected.has(rover.id) && !overResource && rovers.some((unit) => unit !== rover)) {
       const error = orderRoverAssist(game, rovers, rover, append);
       notice(error || (append ? 'Rover assistance queued.' : 'Rovers assigned to assist.'), Boolean(error));
@@ -1053,7 +1056,7 @@ function issueTerrainOrder(units, point, { clientX, clientY }, append) {
     || entityUnder(clientX, clientY, game.buildings) || nearest(game.buildings, point, 1.1);
   const natural = rovers.length ? gatherableUnder(point, clientX, clientY) : null;
   const deposit = building?.deposit && 'surface' in building.deposit ? building.deposit
-    : natural ?? nearest(game.world.deposits.filter((item) => 'surface' in item), point, 2.15);
+    : natural ?? nearest(game.world.deposits.filter((item) => 'surface' in item), point, DEPOSIT_PICK_RADIUS);
   const enemy = nearest(game.hostiles.filter((item) => item.health > 0 && inSight(item, sight)), point, 1.4);
   const relays = game.world.outposts.filter((site) => site.relay && site.discovered && !site.owner);
   const relay = entityUnder(clientX, clientY, relays) || nearest(relays, point, 2.4);

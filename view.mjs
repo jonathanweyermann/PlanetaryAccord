@@ -1101,6 +1101,11 @@ export class WorldView {
         }
         this.entityModels.set(modelId, model);
       }
+      const gear = model.visual.userData.gear;
+      if (gear) {
+        const moved = Math.hypot(entity.x - model.root.position.x, entity.z - model.root.position.z);
+        if (moved < 2) this.rollRunningGear(model, gear, moved);
+      }
       if (model.root.position.x !== entity.x || model.root.position.z !== entity.z) {
         model.root.position.set(entity.x, world.elevation(entity.x, entity.z) + 0.018, entity.z);
       }
@@ -1247,6 +1252,13 @@ export class WorldView {
     element.classList.toggle('map-label--selected', selected);
     element.classList.toggle('map-label--highlighted-mine', highlighted);
     model.label.height = model.roof * model.visual.scale.y + (building.progress < 1 || building.launch ? 0.94 : 0.39);
+  }
+
+  // Rolls wheels by the distance the unit actually travelled.
+  rollRunningGear(model, gear, moved) {
+    if (!moved) return;
+    model.travel = (model.travel ?? 0) + moved / (model.visual.scale.x || 1);
+    for (const wheel of gear.wheels) wheel.rotation.x = model.travel / wheel.userData.radius;
   }
 
   animateUplink(visual, building, time) {
