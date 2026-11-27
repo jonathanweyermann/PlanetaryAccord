@@ -457,6 +457,38 @@ function setSelection(entities, append = false) {
   refreshSelection();
 }
 
+const controlGroups = new Map();
+let lastGroupRecall = { digit: null, at: 0 };
+
+function livingGroup(digit) {
+  const ids = controlGroups.get(digit);
+  if (!ids) return [];
+  const members = [...game.units, ...game.buildings].filter((entity) => ids.has(entity.id) && entity.health > 0);
+  controlGroups.set(digit, new Set(members.map((entity) => entity.id)));
+  return members;
+}
+
+function assignControlGroup(digit) {
+  const members = [...game.units, ...game.buildings].filter((entity) => selected.has(entity.id));
+  if (!members.length) { notice('Select units first, then press Ctrl+' + digit + ' to group them.', true); return; }
+  controlGroups.set(digit, new Set(members.map((entity) => entity.id)));
+  notice(`Group ${digit} set · ${members.length} selected. Press ${digit} to recall.`);
+}
+
+function recallControlGroup(digit, append) {
+  const members = livingGroup(digit);
+  if (!members.length) return false;
+  const now = performance.now();
+  setSelection(members, append);
+  if (lastGroupRecall.digit === digit && now - lastGroupRecall.at < 350) {
+    const x = members.reduce((sum, entity) => sum + entity.x, 0) / members.length;
+    const z = members.reduce((sum, entity) => sum + entity.z, 0) / members.length;
+    view.center(x, z);
+  }
+  lastGroupRecall = { digit, at: now };
+  return true;
+}
+
 function selectType(type) {
   const entities = type === 'command' ? [game.buildings[0]] : game.units.filter((unit) => unit.type === type);
   if (!entities.length) {
@@ -1373,6 +1405,13 @@ function setMapEvents() {
     if (modalOpen || event.target instanceof HTMLInputElement) return;
     const key = event.key.toLowerCase();
     if (event.repeat) return;
+    const digit = /^Digit([0-9])$/.exec(event.code)?.[1];
+    if (digit && (event.ctrlKey || event.metaKey || event.altKey)) {
+      event.preventDefault();
+      assignControlGroup(digit);
+      return;
+    }
+    if (digit && recallControlGroup(digit, event.shiftKey)) { event.preventDefault(); return; }
     if (!event.ctrlKey && !event.metaKey && !event.altKey) {
       const pending = performance.now() < buildShortcutUntil;
       buildShortcutUntil = 0;

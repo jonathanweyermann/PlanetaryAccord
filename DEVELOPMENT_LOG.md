@@ -156,3 +156,19 @@ The game was played in the browser pane at `http://localhost:8000/?seed=22204131
 - Stockpiles are lower but still large late in the game (about 1,000–2,000 metal); late-game sinks such as more units, the uplink or more trade could help.
 - Forge on seed 12345 stays at Tier II because its terrain has few straight-line build sites.
 - Number keys 1–6 start building placement.
+
+## 2026-11-27 — Iteration 7: control groups
+
+### Change
+- RTS control groups: Ctrl+digit (or Alt+digit, since browsers reserve Ctrl+1–8 in a normal tab) stores the selection; the digit recalls it, Shift+digit adds it to the selection, and a double-tap centres the camera on the group. Dead members drop out automatically.
+- An unassigned digit still starts building placement, so the existing 1–6 shortcuts keep working until a group is bound to that digit.
+- The controls footer lists the new shortcut.
+
+### Evidence
+- All tests pass and `node --check main.mjs` is clean.
+- **Not verified in the browser:** starting the local preview server was declined in this automated run, so the key handling has not been played or seen yet.
+
+### Remaining weaknesses
+- Verify control groups in the browser, and check whether Ctrl+digit reaches the page in the app's pane.
+- The alien hives from commit 0e8071b have no log entry or playtest notes.
+- The weaknesses listed under Iteration 6 still stand.
