@@ -56,6 +56,7 @@ function glowTexture(size = 32) {
 
 const softTexture = glowTexture();
 const shadowGeometry = new THREE.PlaneGeometry(2, 2);
+const MIN_ZOOM = 0.085;
 const DUST_COUNT = 260;
 const DUST_LIFETIME = 1.4;
 
@@ -297,7 +298,11 @@ export class WorldView {
   }
 
   updateCamera() {
-    this.camera.position.copy(this.focus).add(this.cameraDirection);
+    // Zoomed far out, pull the camera back along the same angle so the whole map stays inside its depth range.
+    const pullback = Math.max(1, 0.75 / (this.zoom ?? 1));
+    this.camera.position.copy(this.focus).addScaledVector(this.cameraDirection, pullback);
+    this.camera.far = 220 * pullback;
+    this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.focus);
     this.camera.updateMatrixWorld();
     this.onFrameChange?.();
@@ -316,7 +321,8 @@ export class WorldView {
   }
 
   setZoom(value, cursor) {
-    const zoom = THREE.MathUtils.clamp(value, 0.62, 2.9);
+    // The far end shows the entire map on one screen, like a large minimap.
+    const zoom = THREE.MathUtils.clamp(value, MIN_ZOOM, 2.9);
     if (cursor && zoom !== this.zoom) {
       this.setPointerRay(cursor.clientX, cursor.clientY);
       const { origin, direction } = this.ray.ray;
@@ -329,6 +335,8 @@ export class WorldView {
         this.focus.z + (anchorZ - this.focus.z) * shift);
     }
     this.zoom = zoom;
+    // In the whole-map overview, resource labels would pile up; keep only home and structure labels.
+    this.overlay.classList.toggle('map-labels--overview', zoom < 0.4);
     this.resize();
   }
 

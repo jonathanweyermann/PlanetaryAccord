@@ -70,7 +70,7 @@ export const BUILDINGS = {
   solar: { name: 'Solar Array', tier: 1, key: '2', shortcut: 's', cost: { metal: 30, biomass: 10 }, time: 19, produces: 'energy', output: 1.65, description: 'Generates energy. Desert sites yield more.' },
   habitat: { name: 'Habitat', tier: 1, key: '3', shortcut: 'h', cost: { metal: 35, biomass: 30 }, time: 32, produces: 'energy', output: -0.12, description: 'Houses 5 additional colonists.' },
   farm: { name: 'Farm', tier: 1, key: '4', shortcut: 'f', cost: { metal: 25, biomass: 20 }, time: 24, produces: 'food', output: 0.72, description: 'Produces food. Fertile plains yield more.' },
-  bio: { name: 'Biomass Yard', tier: 1, key: '5', shortcut: 'b', cost: { metal: 25, energy: 15 }, time: 22, deposit: 'biomass', produces: 'biomass', output: 0.88, description: 'Clear trees from a Biomass Grove to build a yard that produces biomass.' },
+  bio: { name: 'Biomass Yard', tier: 1, key: '5', shortcut: 'b', cost: { metal: 25, energy: 15 }, time: 22, deposit: 'biomass', produces: 'biomass', output: 0.88, description: 'Place on a Biomass Grove. The crew clears any trees in the way, then builds a yard that produces biomass.' },
   wall: { name: 'Fortified Wall', tier: 1, key: '6', shortcut: 'l', cost: { metal: 8 }, time: 7, health: 640, vision: 0,
     description: 'Blocks units and weapon fire. Enemy walls require an explicit attack order.' },
   factory: { name: 'Combat Factory', tier: 2, shortcut: 'c', cost: { metal: 90, biomass: 45 }, time: 36, health: 160, trainingSpeed: 1.25, trains: ['infantry', 'skirmisher', 'sentinel', 'pathfinder'], description: 'Trains Infantry, Skirmishers, Sentinels, and Pathfinders.' },
@@ -425,6 +425,9 @@ const buildingRadii = { command: 3.05, factory: 2.05, foundry: 2.1, tower: 1.15,
   farm: 1.6, solar: 1.65, hydro: 1.7, uplink: 1.7, reclaimer: 1.55, synthesizer: 1.65 };
 const wallRadius = 0.46;
 const siteClearance = 0.06;
+// Buildings must sit at least a rover's width apart, so a gap that looks open can always be driven through.
+export const BUILDING_LANE = 0.8;
+const ROVER_SQUEEZE_CLEARANCE = 0.14;
 
 export function isBlueprint(building) {
   return building.progress === 0 && building.paidProgress === 0;
@@ -578,19 +581,22 @@ export function buildingSite(state, type, point) {
     return { ...site, error: 'Uncrossable ridge. Look for a pass.' };
   }
   if (navigation.intersects(shape.a, shape.b, shape.radius, (other) => other.kind === 'tree')) {
-    return { ...site, error: 'Harvest the trees in the building footprint first.' };
+    // A Biomass Yard sits in a grove, so its crew clears the trees as part of the same order.
+    if (type !== 'bio') return { ...site, error: 'Harvest the trees in the building footprint first.' };
+    site.trees = state.world.gatherables.filter((tree) => tree.kind === 'tree' && tree.surface > 0
+      && segmentGap(shape.a, shape.b, tree, tree) < shape.radius + tree.radius);
   }
   const overlapsStructure = (other) => (other.kind === 'building' || other.kind === 'wall')
     && (type !== 'wall' || other.kind !== 'wall' || distance(other.entity, site) < 0.68 || overlapsWallSegment(site.wall, other));
-  const overlapsBlueprint = (building) => {
-    if (!isBlueprint(building)) return false;
-    const other = buildingFootprint(building);
-    return segmentGap(shape.a, shape.b, other.a, other.b) < shape.radius + other.radius + siteClearance - 1e-7
-      && overlapsStructure(other);
-  };
-  if (navigation.intersects(shape.a, shape.b, shape.radius + siteClearance, overlapsStructure)
-    || [...state.factions.values()].some((faction) => faction.buildings.some(overlapsBlueprint))) {
-    return { ...site, error: 'This site is occupied. Leave room between structures.' };
+  // Walls may abut anything; every other pair of structures keeps a drivable lane between them.
+  const within = (gap) => (other) => overlapsStructure(other)
+    && segmentGap(shape.a, shape.b, other.a, other.b) < shape.radius + other.radius + gap(other) - 1e-7;
+  const blocked = (gap) => navigation.intersects(shape.a, shape.b, shape.radius + BUILDING_LANE, within(gap))
+    || [...state.factions.values()].some((faction) => faction.buildings.some((building) =>
+      isBlueprint(building) && within(gap)(buildingFootprint(building))));
+  if (blocked(() => siteClearance)) return { ...site, error: 'This site is occupied. Leave room between structures.' };
+  if (blocked((other) => (type === 'wall' || other.kind === 'wall' ? siteClearance : BUILDING_LANE))) {
+    return { ...site, error: 'Too close to another structure. Leave a lane for vehicles.' };
   }
   if (unitsInFootprint(state, shape)) return { ...site, error: 'Move units out of the building footprint.' };
   return site;
@@ -796,9 +802,20 @@ export function orderBuilding(state, type, point, rovers, append = false, buildA
     building.rallyPoints = [];
   }
   state.buildings.push(building);
-  for (const worker of workers) setUnitOrder(worker, { kind: 'build', building }, append);
-  log(state, `${BUILDINGS[type].name} construction ordered.`);
+  const trees = site.trees ?? [];
+  for (const [index, worker] of workers.entries()) {
+    // Clear this crew member's share of the footprint's trees, then build.
+    const share = trees.filter((_, treeIndex) => treeIndex % workers.length === index);
+    for (const [step, tree] of share.entries()) setUnitOrder(worker, clearTreeOrder(tree), append || step > 0);
+    setUnitOrder(worker, { kind: 'build', building }, append || share.length > 0);
+  }
+  log(state, trees.length ? `Clearing ${trees.length} tree${trees.length === 1 ? '' : 's'}, then building a ${BUILDINGS[type].name}.`
+    : `${BUILDINGS[type].name} construction ordered.`);
   return null;
+}
+
+function clearTreeOrder(tree) {
+  return { kind: 'harvest', deposit: tree, x: tree.x, z: tree.z, remaining: tree.surface };
 }
 
 export function removeBuilding(state, building, mode) {
@@ -1120,8 +1137,13 @@ function travelEntity(world, entity, target, dt, time, speed, clearance, range, 
   let route = entity.route;
   if (!route || distance(route.goal, target) > 1.25 || (!route.reaches && route.revision !== navigation.revision)
     || (!route.points.length && (route.reaches || time >= route.retryAt))) {
-    route = { ...navigation.route(entity, target, clearance, range, allowed, canReach),
-      goal: { x: target.x, z: target.z }, revision: navigation.revision, retryAt: time + 4 };
+    let found = navigation.route(entity, target, clearance, range, allowed, canReach);
+    // A boxed-in rover may squeeze through gaps that look open but are narrower than its full clearance.
+    if (!found.reaches && entity.type === 'rover' && clearance > ROVER_SQUEEZE_CLEARANCE) {
+      const squeeze = navigation.route(entity, target, ROVER_SQUEEZE_CLEARANCE, range, allowed, canReach);
+      if (squeeze.reaches) found = { ...squeeze, clearance: ROVER_SQUEEZE_CLEARANCE };
+    }
+    route = { ...found, goal: { x: target.x, z: target.z }, revision: navigation.revision, retryAt: time + 4 };
     entity.route = route;
   }
   let travel = speed * dt;
@@ -1133,7 +1155,7 @@ function travelEntity(world, entity, target, dt, time, speed, clearance, range, 
     const dx = (waypoint.x - entity.x) * step / gap;
     const dz = (waypoint.z - entity.z) * step / gap;
     const next = { x: entity.x + dx, z: entity.z + dz };
-    if (!navigation.clearLine(entity, next, clearance, allowed)) {
+    if (!navigation.clearLine(entity, next, route.clearance ?? clearance, allowed)) {
       entity.route = null;
       return false;
     }
@@ -1336,6 +1358,18 @@ function progressOrder(state, unit, order, dt) {
 function construct(state, unit, building, dt) {
   const blueprint = isBlueprint(building);
   const shape = blueprint ? buildingFootprint(building) : null;
+  if (blueprint && building.trees) {
+    // Any builder that arrives while trees still stand in the footprint clears them first.
+    const standing = building.trees.filter((tree) => tree.surface > 0);
+    if (standing.length) {
+      const tree = standing.sort((a, b) => distance(a, unit) - distance(b, unit))[0];
+      const rest = [unit.order, ...unit.queuedOrders];
+      setUnitOrder(unit, clearTreeOrder(tree));
+      unit.queuedOrders.push(...rest);
+      return false;
+    }
+    building.trees = undefined;
+  }
   if (blueprint) {
     building.blockedFootprint = unitsInFootprint(state, shape);
     if (building.blockedFootprint) return false;

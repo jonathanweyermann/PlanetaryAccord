@@ -427,3 +427,5 @@ kbd { display: inline-block; padding: 2px 4px; background: #222e2b; border: 1px 
   .time-controls { gap: 3px; }
   .time-controls button { width: 24px; }
 }
+
+#map-labels.map-labels--overview .map-label:not(.map-label--home):not(.map-label--structure) { display: none; }

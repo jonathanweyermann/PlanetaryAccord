@@ -4,7 +4,7 @@ import { Navigation, pointSegmentDistance } from './navigation.mjs';
 import { LANDING_CLEARANCE, SECTOR_SIZE } from './planet.mjs';
 import { attackBorderPoint, attackBorderWeight } from './territory.mjs';
 import {
-  BIOMES, BUILDINGS, MAP_DEPTH, MAP_MIN_X, MAP_MIN_Z, MAP_WIDTH, UNITS, UNIT_REMAINS_LIFETIME, WALL_LENGTH, addUnit, aimedWallSite, assistConstruction, availableConstructionDeposits, buildingFootprint, buildingSite, createFog, createGame, distance,
+  BIOMES, BUILDINGS, BUILDING_LANE, MAP_DEPTH, MAP_MIN_X, MAP_MIN_Z, MAP_WIDTH, UNITS, UNIT_REMAINS_LIFETIME, WALL_LENGTH, addUnit, aimedWallSite, assistConstruction, availableConstructionDeposits, buildingFootprint, buildingSite, createFog, createGame, distance,
   isBlueprint, maxBuildingHealth, orderBuilding, orderFactionAttack, orderHarvestPatrol, orderRoverAssist, productionDetails, queueTraining, removeBuilding, setConverterRecipe, setRallyPoint, setUnitOrder,
   territoryOwner, unitClearance, unitHitRadius, updateFog, updateGame, wallStrokeSites,
 } from './world.mjs';
@@ -874,7 +874,7 @@ test('harvesting a tree removes its movement blocker and clears a biomass yard f
   const game = fixture([tree]);
   const grove = { ...point(10, 0.8), id: 'grove', type: 'biomass', amount: 100, surface: 100 };
   game.world.deposits.push(grove);
-  assert.match(buildingSite(game, 'bio', grove).error, /Harvest the trees/);
+  assert.deepEqual(buildingSite(game, 'bio', grove).trees, [tree]);
   assert.equal(game.world.navigation.clearLine(point(7, 0), point(13, 0), 0.4), false);
   const rover = rovers(game)[0];
   Object.assign(rover, point(7, 0));
@@ -982,4 +982,53 @@ test('an AI colony that loses every rover trains a replacement even with no meta
   updateGame(game, 0.1);
   updateGame(game, 0.1);
   assert(ai.queue.some((unit) => unit.type === 'rover') || ai.units.some((unit) => unit.type === 'rover' && unit.health > 0));
+});
+
+test('structures keep a drivable lane between them so gaps that look open are passable', () => {
+  const game = fixture();
+  const [rover] = rovers(game);
+  assert.equal(orderBuilding(game, 'farm', point(11, -10), [rover]), null);
+  completeFixtureBuilding(game, game.buildings.at(-1));
+  const radius = buildingFootprint({ type: 'farm', ...point(0, 0) }).radius;
+  const tight = buildingSite(game, 'farm', point(11, -10 + radius * 2 + 0.5));
+  assert.match(tight.error, /lane/);
+  const roomy = buildingSite(game, 'farm', point(11, -10 + Math.ceil((radius * 2 + BUILDING_LANE) * 2) / 2));
+  assert.equal(roomy.error, undefined);
+});
+
+test('a rover boxed in by tightly packed buildings squeezes out', () => {
+  const game = fixture();
+  const rover = addUnit(game, 'rover', 20, 20);
+  const radius = buildingFootprint({ type: 'farm', ...point(0, 0) }).radius;
+  const offset = radius + 0.2;
+  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const farm = { id: 900 + dx * 3 + dz, factionId: game.country, type: 'farm', x: 20 + dx * offset, z: 20 + dz * offset, progress: 1, paidProgress: 1 };
+    farm.health = maxBuildingHealth(farm);
+    game.buildings.push(farm);
+    game.world.navigation.addStructure(farm, buildingFootprint(farm));
+  }
+  const goal = point(28, 20);
+  assert(!game.world.navigation.clearLine(rover, goal, unitClearance('rover')));
+  move(rover, goal);
+  tick(game, 6);
+  assert(distance(rover, goal) < 0.2);
+});
+
+test('ordering a biomass yard over trees clears them and builds it in one order', () => {
+  const trees = [point(10, 0), point(10.9, 1.2)].map((at, index) => ({ ...at, id: `tree-${index}`, kind: 'tree', type: 'biomass', radius: 0.6, surface: 10 }));
+  const game = fixture(trees);
+  const grove = { ...point(10, 0.8), id: 'grove', type: 'biomass', amount: 100, surface: 100 };
+  game.world.deposits.push(grove);
+  assert.equal(buildingSite(game, 'wall', point(10, 0)).error === undefined, false);
+  const rover = rovers(game)[0];
+  Object.assign(rover, point(6, 0));
+  const biomass = game.resources.biomass;
+  assert.equal(orderBuilding(game, 'bio', grove, [rover]), null);
+  assert.equal(rover.order.kind, 'harvest');
+  const yard = game.buildings.at(-1);
+  tick(game, 60);
+  assert(trees.every((tree) => tree.surface === 0));
+  assert(game.resources.biomass > biomass);
+  assert.equal(yard.progress, 1);
+  assert.equal(yard.deposit, grove);
 });
