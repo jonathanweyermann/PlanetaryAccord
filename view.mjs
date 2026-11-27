@@ -330,7 +330,8 @@ export class WorldView {
       const groundDistance = -origin.y / direction.y;
       const anchorX = origin.x + direction.x * groundDistance;
       const anchorZ = origin.z + direction.z * groundDistance;
-      const shift = 1 - this.zoom / zoom;
+      // Zooming in recentres on the point under the cursor; zooming out keeps that point under the cursor.
+      const shift = zoom > this.zoom ? 1 : 1 - this.zoom / zoom;
       this.center(this.focus.x + (anchorX - this.focus.x) * shift,
         this.focus.z + (anchorZ - this.focus.z) * shift);
     }
