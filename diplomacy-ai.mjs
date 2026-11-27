@@ -57,7 +57,9 @@ export function evaluatePeaceOffer(diplomacy, offer) {
   const receiver = diplomacy.factions.get(to);
   const personality = receiver.personality;
   const history = pair.views.get(to);
-  const militaryEdge = advantage(diplomacy, to, from);
+  // Peace is judged on armies in the field; towers at home cannot press an attack.
+  const field = (id) => (diplomacy.rules.fieldStrength ?? diplomacy.rules.strength)(diplomacy.factions.get(id));
+  const militaryEdge = bound(Math.log2((field(to) + 20) / (field(from) + 20)), -2, 2);
   const otherWars = diplomacy.warCount(to) - Number(pair.state === STANCE.WAR);
   const receiveValue = Object.entries(offered).reduce((value, [type, amount]) =>
     value + tradeValue({ [type]: amount }) * (1 + stockPressure(receiver, type) * 0.9), 0);
@@ -75,7 +77,8 @@ export function evaluatePeaceOffer(diplomacy, offer) {
     + (receiver.buildings[0].upgrade || receiver.researchProject ? 8 : 0)
     + history.agreements * personality.trust * 3 - history.treatyViolations * 16
     - Math.max(0, history.incursions - 1) * 5 - (threat && payValue > receiveValue ? 6 : 0)
-    + bound((duration - diplomacy.config.ceasefireDuration) / 160, -4, 6) * (1 - personality.aggression * 1.5);
+    + bound((duration - diplomacy.config.ceasefireDuration) / 160, -4, 6) * (1 - personality.aggression * 1.5)
+    + (pair.state === STANCE.WAR ? Math.min(25, (diplomacy.time - (pair.warSince ?? diplomacy.time)) / 18) : 0);
   if (score >= 23) return { accepted: true, reason: net >= 30 ? 'The offered resources make peace worthwhile.' : 'The faction sees more value in peace.' };
   const reason = payValue > receiveValue * 1.25 && payValue >= 15 ? 'The requested payment is too costly.'
     : conquest ? 'The faction is pursuing a territorial objective.'
@@ -274,8 +277,10 @@ export function advanceDiplomaticAI(diplomacy) {
         const other = diplomacy.factions.get(pair.factions.find((candidate) => candidate !== id));
         if (faction.controller !== 'ai') continue;
         const urgent = collapsing(id);
+        // War weariness: a war that drags on builds pressure to negotiate.
+        const weariness = Math.min(30, (diplomacy.time - (pair.warSince ?? diplomacy.time)) / 15);
         const peacePressure = faction.personality.diplomacy * 30 - advantage(diplomacy, id, other.country) * 15
-          + (diplomacy.warCount(id) - 1) * 15 + (urgent ? 30 : 0);
+          + (diplomacy.warCount(id) - 1) * 15 + (urgent ? 30 : 0) + weariness;
         const tribute = urgent ? proportionalPayment(faction, other, 0.4, 180) : proportionalPayment(faction, other, 0.15, 75);
         if (peacePressure > 22 && propose(diplomacy, faction, other, tribute)) break;
       }

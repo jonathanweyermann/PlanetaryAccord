@@ -186,7 +186,7 @@ export function createGame(seed, options = {}) {
     }
   }
   const diplomacy = new Diplomacy(factions, {
-    log, strength: militaryStrength, value: tradeValue, territorialValue, resources: Object.keys(RESOURCES),
+    log, strength: militaryStrength, fieldStrength, value: tradeValue, territorialValue, resources: Object.keys(RESOURCES),
     resourceName: (type) => RESOURCES[type].name.toLowerCase(),
     commandIntegrity: (id) => { const command = factions.get(id).buildings[0]; return command ? command.health / maxBuildingHealth(command) : 0; },
     contact: (a, b) => {
@@ -352,8 +352,11 @@ function buildingOutput(state, building) {
 }
 
 export function productionDetails(state, seconds = 1) {
-  // A colony with no rovers has no way to gather; Command salvages a trickle of metal so it can rebuild one.
-  const salvage = state.buildings[0]?.health > 0 && !state.units.some((unit) => unit.type === 'rover' && unit.health > 0) ? 0.25 : 0;
+  // A colony with no rovers or no working mine can stall for good; Command salvages a trickle of metal so it can recover.
+  const stranded = !state.units.some((unit) => unit.type === 'rover' && unit.health > 0)
+    || (state.controller === 'ai' && state.resources.metal < 50
+      && !state.buildings.some((building) => building.type === 'mine' && building.progress === 1 && building.health > 0));
+  const salvage = state.buildings[0]?.health > 0 && stranded ? 0.25 : 0;
   const rates = { metal: salvage, biomass: 0, food: 0.15 - state.population * 0.033, energy: 0.48, crystal: 0, vent: 0 };
   const active = [];
   for (const building of state.buildings) {
@@ -979,6 +982,14 @@ function militaryStrength(state) {
 
 // How tempting a rival's deposits are. Distance is judged relative to how far apart the two
 // colonies are, so deposits on the near side of a distant rival's territory still count.
+// Strength that can actually take the field: units only, no towers or command batteries.
+function fieldStrength(state) {
+  return state.units.reduce((total, unit) => {
+    const weapon = UNITS[unit.type].combat;
+    return total + (weapon && unit.health > 0 ? unit.health / 12 + weapon.damage / weapon.cooldown : 0);
+  }, 0);
+}
+
 function territorialValue(state, other) {
   const gap = Math.max(35, distance(state.home, other.home));
   let value = 0;
@@ -1626,17 +1637,25 @@ function bestConstructionSite(colony, type, rovers) {
   let best;
   let bestScore = -Infinity;
   const scoreSite = (point) => {
+    if (colony.blockedSites?.some((blocked) => distance(blocked, point) < 6)) return;
     const site = buildingSite(colony, type, point);
     if (site.error) return;
+    // Only consider sites a rover can drive straight to; this keeps crews off plateaus behind ridges.
+    if (!site.deposit && !rovers.some((rover) => colony.world.navigation.clearLine(rover, site, unitClearance('rover')))) return;
     const travel = Math.min(...rovers.map((rover) => distance(rover, site))) / UNITS.rover.speed;
     const biome = colony.world.sample(site.x, site.z);
-    const yieldRate = siteOutput(type, biome) + (type === 'habitat' ? 1 : 0);
+    const output = siteOutput(type, biome);
+    // Non-producing structures (factories, towers, habitats) just go where crews can build them quickly.
+    const yieldRate = BUILDINGS[type].produces && output > 0 ? output : 1;
     const supplyBonus = site.deposit ? 0.9 + Math.min(site.deposit.amount / 940, 1) * 0.1 : 1;
     const score = yieldRate * supplyBonus / (BUILDINGS[type].time / (BIOMES[biome].buildSpeed ?? 1) + travel);
     if (score > bestScore) { best = site; bestScore = score; }
   };
   if (BUILDINGS[type].deposit) {
-    for (const site of colony.supplySites) if (site.type === BUILDINGS[type].deposit) scoreSite(site);
+    // Prefer surveyed supply sites; fall back to any owned deposit (crystal and vents have no surface supply).
+    const owned = colony.supplySites.some((site) => site.type === BUILDINGS[type].deposit) ? colony.supplySites
+      : colony.world.deposits.filter((site) => territoryOwner(colony.world, site) === colony.country);
+    for (const site of owned) if (site.type === BUILDINGS[type].deposit) scoreSite(site);
   } else {
     for (let dx = -27; dx <= 27; dx += 3) {
       for (let dz = -27; dz <= 27; dz += 3) {
@@ -1647,7 +1666,70 @@ function bestConstructionSite(colony, type, rovers) {
   return best;
 }
 
+// Housing beyond this only feeds an idle population; surplus goes into development instead.
+const populationTarget = (colony) => 20 + (colony.buildings[0].tier ?? 1) * 10;
+
+// Spends surplus on progression: upgrades, advanced production, extractors and research.
+function planDevelopment(colony, rates, rovers) {
+  const command = colony.buildings[0];
+  const tier = command.tier ?? 1;
+  const owns = (type) => colony.buildings.some((building) => building.type === type);
+  const build = (type) => {
+    if (!rovers.length || !canAfford(colony, BUILDINGS[type].cost)) return false;
+    const site = bestConstructionSite(colony, type, rovers);
+    if (!site || orderBuilding(colony, type, site, rovers.slice(0, 2))) return false;
+    colony.lastAction = `Building a ${BUILDINGS[type].name}`;
+    return true;
+  };
+  // Colonies without a biomass grove convert surplus food into biomass instead of stalling.
+  const reclaimer = colony.buildings.find((building) => building.type === 'reclaimer' && building.progress === 1);
+  if (reclaimer) {
+    const recipe = colony.resources.biomass < 120 && colony.resources.food > 200 ? 'biomass'
+      : colony.resources.metal < 120 && colony.resources.biomass > 250 ? 'metal' : 'off';
+    if (reclaimer.recipe !== recipe) setConverterRecipe(colony, reclaimer, recipe);
+  }
+  if (tier >= 2 && !owns('reclaimer') && !owns('bio') && colony.resources.biomass < 120 && build('reclaimer')) return true;
+  if (colony.resources.metal < 140) return false;
+  const upgrade = (next, after) => tier === next - 1 && !command.upgrade && colony.time > after
+    && canAfford(colony, COMMAND_TIERS[next].cost) && !orderCommandUpgrade(colony);
+  if (upgrade(2, 600) || upgrade(3, 1500)) { colony.lastAction = `Upgrading Command to Tier ${tier + 1}`; return true; }
+  if (tier >= 2) {
+    if (!owns('factory') && build('factory')) return true;
+    if (!owns('crystalTap') && build('crystalTap')) return true;
+    if (!owns('geoTap') && build('geoTap')) return true;
+    if (!owns('hydro') && rates.food < 0.8 && build('hydro')) return true;
+    if (!colony.researchProject) {
+      const project = Object.entries(RESEARCH).find(([id, item]) => item.tier <= tier && !colony.research.has(id) && canAfford(colony, item.cost));
+      if (project && !orderResearch(colony, project[0])) { colony.lastAction = `Researching ${project[1].name}`; return true; }
+    }
+  }
+  if (tier >= 3 && !owns('foundry') && build('foundry')) return true;
+  const bastions = colony.buildings.filter((building) => building.type === 'bastion').length;
+  if (tier >= 3 && bastions < 1 + (colony.personality.military > 0.75 ? 1 : 0)) {
+    const site = towerSite(colony);
+    if (site && canAfford(colony, BUILDINGS.bastion.cost) && !orderBuilding(colony, 'bastion', site, rovers.slice(0, 2))) {
+      colony.lastAction = 'Building a Defense Bastion';
+      return true;
+    }
+  }
+  return false;
+}
+
+// Cancels blueprints no crew can reach (e.g. behind a ridge) and remembers the spot so it is not chosen again.
+function abandonUnreachableSites(colony) {
+  for (const building of colony.buildings.filter((item) => item.progress === 0 && !BUILDINGS[item.type].deposit)) {
+    const crew = colony.units.filter((unit) => unit.order?.kind === 'build' && unit.order.building === building);
+    if (!crew.length || !crew.every((unit) => unit.route && !unit.route.reaches)) { building.stuckSince = undefined; continue; }
+    building.stuckSince ??= colony.time;
+    if (colony.time - building.stuckSince < 12) continue;
+    (colony.blockedSites ??= []).push({ x: building.x, z: building.z });
+    removeBuilding(colony, building, 'cancel');
+    colony.lastAction = `Abandoning an unreachable ${BUILDINGS[building.type].name} site`;
+  }
+}
+
 function planIndustry(colony, rates, rovers) {
+  abandonUnreachableSites(colony);
   if (!rovers.length) return;
   // Resume blueprints whose crew was lost; otherwise they block that building type forever.
   const crewed = new Set(colony.units.map((unit) => unit.order?.kind === 'build' && unit.order.building).filter(Boolean));
@@ -1664,15 +1746,23 @@ function planIndustry(colony, rates, rovers) {
     ['bio', !has('bio')],
     ['solar', !has('solar') || (rates.energy < 0.4 && !underConstruction('solar'))],
     ['farm', !has('farm') || (rates.food < 0.35 && !underConstruction('farm'))],
-    ['habitat', colony.population >= capacity(colony) - 1 && !underConstruction('habitat')],
+    ['habitat', colony.population >= capacity(colony) - 1 && capacity(colony) < populationTarget(colony) && !underConstruction('habitat')],
   ];
+  // Fund a reachable, unpaid extractor before starting anything (other than food) that competes for metal.
+  const funding = colony.buildings.some((building) => building.progress < 1 && BUILDINGS[building.type].deposit
+    && building.materialShortage && colony.units.some((unit) => unit.order?.building === building && unit.route?.reaches !== false));
   for (const [type, needed] of plans) {
-    if (!needed) continue;
+    if (!needed || (funding && type !== 'farm')) continue;
+    // Until a mine works, keep enough metal in reserve to pay for one.
+    const reserve = type !== 'mine' && !colony.buildings.some((building) => building.type === 'mine' && building.progress === 1)
+      ? BUILDINGS.mine.cost.metal : 0;
+    if (colony.resources.metal - (BUILDINGS[type].cost.metal ?? 0) < reserve) continue;
     const site = bestConstructionSite(colony, type, rovers);
     if (!site || orderBuilding(colony, type, site, rovers)) continue;
     colony.lastAction = `Building a ${BUILDINGS[type].name}`;
     return;
   }
+  if (colony.buildings.filter((building) => building.progress < 1).length < 2) planDevelopment(colony, rates, rovers);
 }
 
 function sendIdleRovers(colony) {
@@ -1686,6 +1776,8 @@ function sendIdleRovers(colony) {
     let best;
     let bestScore = 0;
     for (const site of colony.supplySites) {
+      // A deposit under a blueprint or extractor cannot be hand-harvested; skip it instead of idling there.
+      if (colony.buildings.some((building) => building.deposit === site)) continue;
       const target = stockTargets[site.type];
       const shortage = Math.max(0, target - colony.resources[site.type]) / target;
       const amount = Math.min(20, site.surface - (assigned.get(site) || 0));
@@ -1728,13 +1820,31 @@ function planRecruits(colony, rates, underThreat) {
   const count = (type) => roster.filter((unit) => unit.type === type).length;
   // Standing armies are capped by temperament so wars are contests, not massacres of 90-unit hordes.
   const armyCap = Math.round(6 + colony.personality.military * 12) + (underThreat ? 6 : 0);
-  const army = roster.filter((unit) => UNITS[unit.type].combat).length;
+  const basic = (unit) => unit.type === 'infantry';
+  // Advanced units get their own slots so a colony that unlocks a factory improves its army's quality.
+  const advancedSlots = (colony.buildings.some((building) => building.type === 'factory' && building.progress === 1) ? 3 : 0)
+    + (colony.buildings.some((building) => building.type === 'foundry' && building.progress === 1) ? 3 : 0)
+    + Math.round(colony.personality.military * 3);
+  const advancedCount = roster.filter((unit) => UNITS[unit.type].combat && !basic(unit)).length;
+  const army = roster.filter((unit) => UNITS[unit.type].combat).length - (advancedCount < advancedSlots ? advancedSlots : advancedCount);
   const rovers = count('rover') < Math.min(5, Math.ceil(colony.population / 4));
   const type = (underThreat || (colony.personality.military > 0.75 && count('infantry') < 3)) && army < armyCap ? 'infantry'
     : rovers ? 'rover' : count('scout') < 2 ? 'scout' : army < armyCap ? 'infantry' : null;
   if (!type) return;
-  if (colony.resources.metal < UNITS[type].cost.metal + 42 || !canAfford(colony, UNITS[type].cost)) return;
-  if (!queueUnit(colony, type)) colony.lastAction = `Training ${UNITS[type].name}`;
+  // Advanced facilities turn the same army cap into a stronger force rather than a larger one.
+  const ready = (kind) => colony.buildings.find((building) => building.type === kind && building.progress === 1 && building.health > 0);
+  let trainee = type;
+  let facility = colony.buildings[0];
+  if (type === 'infantry') {
+    const heavy = ready('foundry');
+    const light = ready('factory');
+    const pick = (options) => options.find((option) => canAfford(colony, UNITS[option].cost));
+    const advanced = heavy && pick(army % 4 === 3 ? ['siege', 'vanguard'] : ['vanguard'])
+      || light && pick(army % 2 ? ['sentinel', 'skirmisher'] : ['skirmisher', 'sentinel']);
+    if (advanced) { trainee = advanced; facility = heavy && ['vanguard', 'siege'].includes(advanced) ? heavy : light; }
+  }
+  if (colony.resources.metal < (UNITS[trainee].cost.metal ?? 0) + 42 || !canAfford(colony, UNITS[trainee].cost)) return;
+  if (!queueUnit(colony, trainee, 1, facility)) colony.lastAction = `Training ${UNITS[trainee].name}`;
 }
 
 function planMilitary(colony) {
@@ -1747,8 +1857,10 @@ function planMilitary(colony) {
     const intruders = intrudingUnits(other, country);
     const targets = intruders.length ? intruders : [...other.units.filter(isMilitary), ...other.buildings]
       .filter((target) => target.type !== 'wall' && target.health > 0);
-    const canAdvance = colony.conquestTarget === other.country || colony.personality.aggression > 0.6
-      || combat.some((unit) => territoryOwner(world, unit) === other.country);
+    // Only march out with a clear field advantage; otherwise hold near home where towers and Command help.
+    const outnumber = fieldStrength(colony) > fieldStrength(other) * (1.35 - colony.personality.aggression * 0.4);
+    const canAdvance = colony.conquestTarget === other.country
+      || (outnumber && (colony.personality.aggression > 0.6 || combat.some((unit) => territoryOwner(world, unit) === other.country)));
     for (const unit of available) {
       const target = targets.reduce((nearest, enemy) => !nearest || distance(unit, enemy) < distance(unit, nearest) ? enemy : nearest, null);
       if (!target || (!canAdvance && !intruders.length && distance(unit, target) > 22)
