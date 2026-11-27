@@ -56,6 +56,26 @@ function glowTexture(size = 32) {
 
 const softTexture = glowTexture();
 const shadowGeometry = new THREE.PlaneGeometry(2, 2);
+const DUST_COUNT = 260;
+const DUST_LIFETIME = 1.4;
+
+// Pooled dust puffs kicked up behind moving vehicles; each drifts up and fades as it ages.
+function createDust() {
+  const geometry = new THREE.BufferGeometry();
+  const position = new Float32Array(DUST_COUNT * 3);
+  const color = new Float32Array(DUST_COUNT * 4);
+  geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(color, 4));
+  const material = new THREE.PointsMaterial({
+    map: softTexture, vertexColors: true, transparent: true, depthWrite: false, size: 20, sizeAttenuation: false,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  // Draw after the translucent terrain overlays so they do not hide the puffs; solid geometry still occludes.
+  points.renderOrder = 6;
+  return { points, position, color, life: new Float32Array(DUST_COUNT), drift: new Float32Array(DUST_COUNT * 3), next: 0, clock: performance.now() };
+}
+
 const shadowMaterial = new THREE.MeshBasicMaterial({ map: softTexture, color: '#0b1520', transparent: true, opacity: 0.72, depthWrite: false });
 
 function contactShadow(radius) {
@@ -223,6 +243,8 @@ export class WorldView {
     }));
     this.vapor.frustumCulled = false;
     this.scene.add(this.vapor);
+    this.dust = createDust();
+    this.scene.add(this.dust.points);
     new ResizeObserver(() => this.resize()).observe(canvas);
   }
 
@@ -1057,6 +1079,7 @@ export class WorldView {
     if (alert?.border) this.attackBorder.value.set(alert.border.x - MAP_MIN_X, alert.border.z - MAP_MIN_Z, alert.strength);
     else this.attackBorder.value.z = 0;
     this.updateHarvestables();
+    this.updateDust();
     this.drawUnitRemains(state, sight);
     this.drawBlueprints(state, selection);
     const alive = new Set();
@@ -1104,7 +1127,7 @@ export class WorldView {
       const gear = model.visual.userData.gear;
       if (gear) {
         const moved = Math.hypot(entity.x - model.root.position.x, entity.z - model.root.position.z);
-        if (moved < 2) this.rollRunningGear(model, gear, moved);
+        if (moved < 2) this.rollRunningGear(model, gear, moved, entity);
       }
       if (model.root.position.x !== entity.x || model.root.position.z !== entity.z) {
         model.root.position.set(entity.x, world.elevation(entity.x, entity.z) + 0.018, entity.z);
@@ -1254,11 +1277,46 @@ export class WorldView {
     model.label.height = model.roof * model.visual.scale.y + (building.progress < 1 || building.launch ? 0.94 : 0.39);
   }
 
-  // Rolls wheels by the distance the unit actually travelled.
-  rollRunningGear(model, gear, moved) {
+  // Rolls wheels by the distance the unit actually travelled and kicks up dust behind it.
+  rollRunningGear(model, gear, moved, entity) {
     if (!moved) return;
-    model.travel = (model.travel ?? 0) + moved / (model.visual.scale.x || 1);
+    const scale = model.visual.scale.x || 1;
+    model.travel = (model.travel ?? 0) + moved / scale;
     for (const wheel of gear.wheels) wheel.rotation.x = model.travel / wheel.userData.radius;
+    model.dustDistance = (model.dustDistance ?? 0) + moved;
+    if (model.dustDistance < 0.22) return;
+    model.dustDistance = 0;
+    const heading = entity.heading ?? 0;
+    for (const side of [-1, 1]) {
+      const index = this.dust.next;
+      this.dust.next = (index + 1) % DUST_COUNT;
+      const back = 0.55 * scale;
+      const x = entity.x - Math.sin(heading) * back + Math.cos(heading) * side * 0.3 * scale;
+      const z = entity.z - Math.cos(heading) * back - Math.sin(heading) * side * 0.3 * scale;
+      this.dust.position.set([x, this.world.elevation(x, z) + 0.45, z], index * 3);
+      this.dust.drift.set([(Math.random() - 0.5) * 0.3 - Math.sin(heading) * 0.25, 0.32 + Math.random() * 0.2,
+        (Math.random() - 0.5) * 0.3 - Math.cos(heading) * 0.25], index * 3);
+      this.dust.life[index] = 1;
+    }
+  }
+
+  updateDust() {
+    const now = performance.now();
+    const dt = Math.max(0, Math.min(0.1, (now - this.dust.clock) / 1000));
+    this.dust.clock = now;
+    const { position, color, life, drift, points } = this.dust;
+    for (let index = 0; index < DUST_COUNT; index++) {
+      if (life[index] > 0) {
+        life[index] = Math.max(0, life[index] - dt / DUST_LIFETIME);
+        for (let axis = 0; axis < 3; axis++) position[index * 3 + axis] += drift[index * 3 + axis] * dt;
+      }
+      color.set([0.76, 0.68, 0.55, life[index] * 0.75], index * 4);
+    }
+    points.geometry.getAttribute('position').needsUpdate = true;
+    points.geometry.getAttribute('color').needsUpdate = true;
+    // Orthographic camera: size puffs in world units converted to screen pixels.
+    const { camera } = this;
+    points.material.size = 0.9 * this.renderer.domElement.clientHeight * camera.zoom / (camera.top - camera.bottom);
   }
 
   animateUplink(visual, building, time) {
